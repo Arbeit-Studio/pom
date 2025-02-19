@@ -47,6 +47,51 @@ def test_map():
     assert b.name == "ynnhoJ"
 
 
+def test_map_passing_target_as_instance():
+    class A:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    class B:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    a = A("Johnny", "johnny@mail.com")
+    b = B(None, None)
+
+    mapper = Mapper()
+    mapper.add_mapping(source=A, target=B, mapping={"name": lambda n: n[::-1]})
+    b = mapper.map(a, b)
+    assert isinstance(b, B)
+    assert b.name == "ynnhoJ"
+    assert b.email == a.email
+
+
+def test_map_exclude():
+    class A:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    class B:
+        def __init__(self, name: str, email: str = None):
+            self.name = name
+            self.email = email or "fixed@email.com"
+
+    a = A("Johnny", "johnny@mail.com")
+
+    mapper = Mapper()
+    mapper.add_mapping(
+        source=A, target=B, mapping={"name": lambda n: n[::-1]}, exclusions=["email"]
+    )
+    b = mapper.map(a, B)
+    assert isinstance(b, B)
+    assert b.name == "ynnhoJ"
+    assert b.email == "fixed@email.com"
+
+
 def test_map_passing_extra_properties():
     class A:
         def __init__(self, name: str, email: str):
@@ -186,7 +231,7 @@ def test_mapping_with_different_property_names():
     mapper.add_mapping(
         source=A,
         target=B,
-        mapping={"name": "name", "email": "email_address"},
+        mapping={"email": "email_address"},
     )
 
     b = mapper.map(a, B)
