@@ -27,6 +27,45 @@ def test_map_source_object_missing_property(skip_init, check_if_raised):
         b = mapper.map(a, B, skip_init=skip_init)
 
 
+def test_map_source_object_missing_property_to_instance_target_objet():
+    class A:
+        def __init__(self, email: str):
+            self.email = email
+
+    class B:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    a = A("johnny@mail.com")
+    b = B("Johnny", None)
+
+    mapper = Mapper()
+    with does_not_raise():
+        mapper.add_mapping(source=A, target=B)
+        mapper.map(a, b)
+        assert b.email == a.email
+        assert b.name == "Johnny"
+
+
+def test_add_mapping_source_object_missing_property_provided_in_the_mapping_dictionary():
+    class A:
+        def __init__(self, email: str):
+            self.email = email
+
+    class B:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    a = A("johnny@mail.com")
+    b = B("Johnny", None)
+
+    mapper = Mapper()
+    with pytest.raises(TypeError):
+        mapper.add_mapping(source=A, target=B, mapping={"name": lambda n: n[::-1]})
+
+
 def test_map():
     class A:
         def __init__(self, name: str, email: str):
@@ -67,6 +106,30 @@ def test_map_passing_target_as_instance():
     assert isinstance(b, B)
     assert b.name == "ynnhoJ"
     assert b.email == a.email
+
+
+def test_map_exclusions_passing_target_as_instance():
+    class A:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    class B:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    a = A("Johnny", "johnny@mail.com")
+    b = B(None, None)
+
+    mapper = Mapper()
+    mapper.add_mapping(
+        source=A, target=B, mapping={"name": lambda n: n[::-1]}, exclusions=["email"]
+    )
+    b = mapper.map(a, b)
+    assert isinstance(b, B)
+    assert b.name == "ynnhoJ"
+    assert b.email == None
 
 
 def test_map_exclude():

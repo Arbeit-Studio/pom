@@ -27,15 +27,30 @@ class Mapper:
         self.exclusions = defaultdict(partial(defaultdict, list))
 
     def add_mapping(
-        self, *, source: SourceType, target: TargetType, mapping=None, exclusions=None
+        self,
+        *,
+        source: SourceType,
+        target: TargetType,
+        mapping: dict = None,
+        exclusions: list = None,
     ):
+        # if mapping:
+        #     self.guard_all_mappings_in_source(source, mapping)
         self.mappings[source][target].update(mapping or {})
         self.exclusions[source][target].extend(exclusions or [])
+
+    def guard_all_mappings_in_source(self, source, mapping):
+        mapping_attrs = mapping.keys()
+        source_attrs = [m[0] for m in getmembers(source)]
+        if not all(attr in source_attrs for attr in mapping_attrs):
+            raise TypeError(
+                f"Mapping attributes {mapping_attrs} not found in source {source}"
+            )
 
     def map(
         self,
         source_instance: TS,
-        target_type: type[TT],
+        target: Union[TT, type[TT]],
         skip_init: bool = False,
         extra: dict = None,
     ) -> TT:
@@ -47,6 +62,9 @@ class Mapper:
             skip_init: Skip __init__ when creating target instance
             extra: Additional attributes to set on target instance
         """
+        target_is_type = callable(target)
+        skip_init = skip_init or not target_is_type
+        target_type: type[TT] = target if target_is_type else type(target)
         # Get source properties
         props = self._get_source_props(
             source_instance, type(source_instance), target_type
@@ -66,10 +84,14 @@ class Mapper:
         # Create target instance
         try:
             if skip_init:
-                return self._create_without_init(target_type, mapped_attrs, extra)
+                if not target_is_type:
+                    return self._setattr(target, mapped_attrs, extra)
+                else:
+                    target_instance = object.__new__(target_type)
+                    return self._setattr(target_instance, mapped_attrs, extra)
             return target_type(**mapped_attrs, **(extra or {}))
         except TypeError as e:
-            self._handle_mapping_error(source_instance, target_type, e)
+            self._handle_mapping_error(source_instance, target, e)
 
     def _get_source_props(
         self, source, source_type: type[TT], target_type: type[TS]
@@ -81,11 +103,8 @@ class Mapper:
             )
         return ChainMap(dict(self._get_props(source, source_type, target_type)))
 
-    def _create_without_init(
-        self, target_type: type[TT], attrs: dict, extra: dict = None
-    ) -> TT:
-        """Create instance without calling __init__."""
-        instance = object.__new__(target_type)
+    def _setattr(self, instance: TT, attrs: dict, extra: dict = None) -> TT:
+
         for name, value in attrs.items():
             setattr(instance, name, value)
         for name, value in (extra or {}).items():
