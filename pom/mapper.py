@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import ChainMap, defaultdict
 from collections.abc import Iterable
 from functools import partial
-from inspect import getmembers
+from inspect import getmembers, isclass
 from typing import Any, Callable, Mapping, NoReturn, Tuple, Type, TypeVar, Union
 
 TS = TypeVar("TS")
@@ -29,22 +29,38 @@ class Mapper:
     def add_mapping(
         self,
         *,
-        source: SourceType,
+        source: Union[SourceType, TS],
         target: TargetType,
         mapping: dict = None,
         exclusions: list = None,
     ):
-        # if mapping:
-        #     self.guard_all_mappings_in_source(source, mapping)
-        self.mappings[source][target].update(mapping or {})
-        self.exclusions[source][target].extend(exclusions or [])
+        if mapping:
+            self.guard_all_mappings_in_source(source, mapping)
+        source_type = self._get_source_type(source)
+        self.mappings[source_type][target].update(mapping or {})
+        self.exclusions[source_type][target].extend(exclusions or [])
 
     def guard_all_mappings_in_source(self, source, mapping):
         mapping_attrs = mapping.keys()
-        source_attrs = [m[0] for m in getmembers(source)]
-        if not all(attr in source_attrs for attr in mapping_attrs):
+        if isinstance(source, Iterable):
+            source_attrs = {m[0] for s in source for m in getmembers(s)}
+        else:
+            source_attrs = {m[0] for m in getmembers(source)}
+        missing_attributes={attr for attr in mapping_attrs if attr not in source_attrs}
+        
+        if missing_attributes:
+            missing_attributes = sorted(mapping_attrs)
+            source_name = source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
+            if len(source_name) <= 1:
+                source_name_string = f"source {source_name}"
+            else:
+                source_name_string = f"sources {', '.join(source_name[:-1])} and {source_name[-1]}" 
+            if len(missing_attributes) <= 1:
+                attributes_string = f"attribute {''.join(missing_attributes)}"
+            else:
+                attributes_string= f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
             raise TypeError(
-                f"Mapping attributes {mapping_attrs} not found in source {source}"
+                f"Mapping {attributes_string} not found in {source_name_string}."
             )
 
     def map(
@@ -62,7 +78,7 @@ class Mapper:
             skip_init: Skip __init__ when creating target instance
             extra: Additional attributes to set on target instance
         """
-        target_is_type = callable(target)
+        target_is_type = isclass(target)
         skip_init = skip_init or not target_is_type
         target_type: type[TT] = target if target_is_type else type(target)
         # Get source properties
@@ -71,11 +87,7 @@ class Mapper:
         )
 
         # Get mapping rules
-        source_type = (
-            tuple(type(so) for so in source_instance)
-            if isinstance(source_instance, Iterable)
-            else type(source_instance)
-        )
+        source_type = self._get_source_type(source_instance)
         maps = self.mappings[source_type][target_type]
 
         # Apply mappings
@@ -92,6 +104,15 @@ class Mapper:
             return target_type(**mapped_attrs, **(extra or {}))
         except TypeError as e:
             self._handle_mapping_error(source_instance, target, e)
+
+    def _get_source_type(self, source_instance):
+        source_type = (
+            tuple(so if isclass(so) else type(so) for so in source_instance)
+            if isinstance(source_instance, Iterable)
+            else source_instance if isclass(source_instance) else type(source_instance)
+        )
+        
+        return source_type
 
     def _get_source_props(
         self, source, source_type: type[TT], target_type: type[TS]
@@ -133,6 +154,7 @@ class Mapper:
             prop
             for prop in getmembers(obj)
             if not prop[0].startswith("_")
+            # TODO: handle the exclusions after getting the prop in another place
             and not prop[0] in self.exclusions[source_type][target_type]
         ]
 
