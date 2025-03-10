@@ -2,9 +2,21 @@ from __future__ import annotations
 
 from collections import ChainMap, defaultdict
 from collections.abc import Iterable
+from dataclasses import fields, is_dataclass
 from functools import partial
 from inspect import getmembers, isclass
-from typing import Any, Callable, Mapping, NoReturn, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    NoReturn,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 TS = TypeVar("TS")
 TT = TypeVar("TT")
@@ -12,6 +24,9 @@ TT = TypeVar("TT")
 SourceType = Union[Type[TS], Tuple[Type[TS], ...]]
 TargetType = Type[TT]
 Source = Union[TS, Tuple[TS]]
+MapFunction = Callable[[Any], Any]
+MappingDict = Dict[str, Union[str, MapFunction]]
+MappingSpec = Union[MappingDict, List[str]]
 
 
 def prop():
@@ -31,17 +46,23 @@ class Mapper:
         *,
         source: Union[SourceType, TS],
         target: TargetType,
-        mapping: dict = None,
+        mapping: MappingSpec = None,
         exclusions: list = None,
     ):
         if mapping:
-            self.guard_all_mappings_in_source(source, mapping)
+            self._guard_all_mappings_in_source(source, mapping)
+        if isinstance(mapping, List):
+            mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
         self.mappings[source_type][target].update(mapping or {})
         self.exclusions[source_type][target].extend(exclusions or [])
 
-    def guard_all_mappings_in_source(self, source, mapping):
-        mapping_attrs = mapping.keys()
+    def _guard_all_mappings_in_source(self, source, mapping: MappingSpec):
+        
+        if isinstance(mapping, Mapping):
+            mapping_attrs = mapping.keys()
+        if isinstance(mapping, List):
+            mapping_attrs = mapping
         if isinstance(source, Iterable):
             source_attrs = {m[0] for s in source for m in getmembers(s)}
         else:
@@ -49,19 +70,23 @@ class Mapper:
         missing_attributes={attr for attr in mapping_attrs if attr not in source_attrs}
         
         if missing_attributes:
-            missing_attributes = sorted(mapping_attrs)
-            source_name = source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
-            if len(source_name) <= 1:
-                source_name_string = f"source {source_name}"
-            else:
-                source_name_string = f"sources {', '.join(source_name[:-1])} and {source_name[-1]}" 
-            if len(missing_attributes) <= 1:
-                attributes_string = f"attribute {''.join(missing_attributes)}"
-            else:
-                attributes_string= f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
+            source_name_string, attributes_string = self._format_missing_attrs_error_message(source, mapping_attrs)
             raise TypeError(
                 f"Mapping {attributes_string} not found in {source_name_string}."
             )
+
+    def _format_missing_attrs_error_message(self, source, mapping_attrs):
+        missing_attributes = sorted(mapping_attrs)
+        source_name = source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
+        if len(source_name) <= 1:
+            source_name_string = f"source {source_name}"
+        else:
+            source_name_string = f"sources {', '.join(source_name[:-1])} and {source_name[-1]}" 
+        if len(missing_attributes) <= 1:
+            attributes_string = f"attribute {''.join(missing_attributes)}"
+        else:
+            attributes_string= f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
+        return source_name_string,attributes_string
 
     def map(
         self,
@@ -148,14 +173,20 @@ class Mapper:
         )
 
     def _get_props(
-        self, obj, source_type: type[TT], target_type: type[TS]
+        self, source_object, source_type: type[TT], target_type: type[TS]
     ) -> list[tuple]:
+        if is_dataclass(target_type):
+            t_props = [field.name for field in fields(target_type)]
+        else:
+            t_props = [t_prop[0] for t_prop in getmembers(target_type)]
         return [
-            prop
-            for prop in getmembers(obj)
-            if not prop[0].startswith("_")
+            s_prop
+            for s_prop in getmembers(source_object)
+            if not s_prop[0].startswith("_")
             # TODO: handle the exclusions after getting the prop in another place
-            and not prop[0] in self.exclusions[source_type][target_type]
+            and not s_prop[0] in self.exclusions[source_type][target_type]
+            # does not copy if prop not in target object
+            and s_prop[0] in t_props
         ]
 
     def _maps(self, maps: dict[str, Callable], props: Mapping) -> list[tuple]:

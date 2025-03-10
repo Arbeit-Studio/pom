@@ -1,6 +1,6 @@
 from contextlib import nullcontext as does_not_raise
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, List
 
 import pytest
 
@@ -200,6 +200,8 @@ def test_simplest_map_case():
             self.email = email
 
     class B:
+        name: str = None
+        email: str = None
         def __init__(self, name: str, email: str):
             self.name = name
             self.email = email
@@ -502,8 +504,118 @@ def test_mapping_with_different_property_names_and_transforming_function():
 
 
 def test_it_works_with_dataclasses():
-    raise
+    
+    @dataclass
+    class A:
+        name: str
+        email: str
+
+    @dataclass
+    class B:
+        name: str
+        email: str
+        
+    mapper = Mapper()
+    mapper.add_mapping(source=A, target=B)
+    
+    a = A("Johnny", "johnny@email.com")
+    
+    b = mapper.map(a, B)
+    assert isinstance(b, B)
+    assert b.name == a.name
+    assert b.email == a.email
 
 
-def maybe_test_raises_value_error_when_mapping_not_define():
+
+def test_it_works_with_dataclasses_instance():
+    
+    @dataclass
+    class A:
+        name: str
+        email: str
+
+    @dataclass
+    class B:
+        name: str
+        email: str
+        
+    a = A("Johnny", "johnny@email.com")
+    mapper = Mapper()
+    mapper.add_mapping(source=a, target=B, mapping={"name": reversed_string})
+    
+    
+    b = mapper.map(a, B)
+    assert isinstance(b, B)
+    assert b.name == reversed_string(a.name)
+    assert b.email == a.email
+
+def test_mapping_as_a_list_of_attribute_names():
+        
+    class A:
+        name: str = None
+        email: str = None
+        age: int = None
+        job: str = None
+        address: str = None
+        favorite_food: List[str] = None
+        def __init__(self, name, email, age, job, address, favorite_food):
+            self.name = name
+            self.email = email
+            self.age = age
+            self.jobp= job
+            self.address = address
+            self.favorite_food = favorite_food
+
+    class B:
+        name: str = None
+        favorite_food: List[str] = None
+        def __init__(self, name, favorite_food):
+            self.name = name
+            self.favorite_food = favorite_food
+        
+    a = A("Johnny", "johnny@email.com", 35, "programmer", "my street nº 777", ["churrasco", "pizza"])
+    mapper = Mapper()
+    mapper.add_mapping(source=a, target=B, mapping=["name", "favorite_food"])
+    b = mapper.map(a, B)
+    
+    assert isinstance(b, B)
+    assert b.name == a.name
+    assert b.favorite_food == a.favorite_food
+
+
+def test_does_not_try_to_copy_from_source_object_attributes_missing_from_the_target_objec_2():
+        
+    class A:
+        name: str = None
+        email: str = None
+        age: int = None
+        job: str = None
+        address: str = None
+        favorite_food: List[str] = None
+        def __init__(self, name, email, age, job, address, favorite_food):
+            self.name = name
+            self.email = email
+            self.age = age
+            self.jobp= job
+            self.address = address
+            self.favorite_food = favorite_food
+
+    class B:
+        name: str = None
+        favorite_food: List[str] = None
+        def __init__(self, name, favorite_food):
+            self.name = name
+            self.favorite_food = favorite_food
+        
+    a = A("Johnny", "johnny@email.com", 35, "programmer", "my street nº 777", ["churrasco", "pizza"])
+    mapper = Mapper()
+    mapper.add_mapping(source=a, target=B)
+    b = mapper.map(a, B)
+    
+    assert isinstance(b, B)
+    assert b.name == a.name
+    assert b.favorite_food == a.favorite_food
+
+
+def test_map_works_without_with_only_instance_attributes():
     raise
