@@ -9,9 +9,10 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.8"
-pytest = "^5.4.3"
-black = "^19.10b0"
+python = "^3.9"
+pytest = "^8.3.5"
+black = "^25.1.0"
+
 
 [tool.poetry.dev-dependencies]
 jupyter = "^1.0.0"
