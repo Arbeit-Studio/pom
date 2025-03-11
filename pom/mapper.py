@@ -4,7 +4,7 @@ from collections import ChainMap, defaultdict
 from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from functools import partial
-from inspect import getmembers, isclass
+from inspect import getmembers, isclass, signature
 from typing import (
     Any,
     Callable,
@@ -49,8 +49,7 @@ class Mapper:
         mapping: MappingSpec = None,
         exclusions: list = None,
     ):
-        if mapping:
-            self._guard_all_mappings_in_source(source, mapping)
+        self._guard_all_mappings_in_source(source, mapping)
         if isinstance(mapping, List):
             mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
@@ -58,35 +57,50 @@ class Mapper:
         self.exclusions[source_type][target].extend(exclusions or [])
 
     def _guard_all_mappings_in_source(self, source, mapping: MappingSpec):
-        
+        if not mapping:
+            return
         if isinstance(mapping, Mapping):
             mapping_attrs = mapping.keys()
         if isinstance(mapping, List):
             mapping_attrs = mapping
         if isinstance(source, Iterable):
-            source_attrs = {m[0] for s in source for m in getmembers(s)}
+            source_attrs = {m[0] for s in source for m in getmembers(s)} | {
+                m[0]
+                for s in source
+                for m in list(signature(s.__init__).parameters.keys())[1:]
+            }
         else:
-            source_attrs = {m[0] for m in getmembers(source)}
-        missing_attributes={attr for attr in mapping_attrs if attr not in source_attrs}
-        
+            source_attrs = {m[0] for m in getmembers(source)} | set(
+                list(signature(source.__init__).parameters.keys())[1:]
+            )
+        missing_attributes = {
+            attr for attr in mapping_attrs if attr not in source_attrs
+        }
+
         if missing_attributes:
-            source_name_string, attributes_string = self._format_missing_attrs_error_message(source, mapping_attrs)
+            source_name_string, attributes_string = (
+                self._format_missing_attrs_error_message(source, mapping_attrs)
+            )
             raise TypeError(
                 f"Mapping {attributes_string} not found in {source_name_string}."
             )
 
     def _format_missing_attrs_error_message(self, source, mapping_attrs):
         missing_attributes = sorted(mapping_attrs)
-        source_name = source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
+        source_name = (
+            source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
+        )
         if len(source_name) <= 1:
             source_name_string = f"source {source_name}"
         else:
-            source_name_string = f"sources {', '.join(source_name[:-1])} and {source_name[-1]}" 
+            source_name_string = (
+                f"sources {', '.join(source_name[:-1])} and {source_name[-1]}"
+            )
         if len(missing_attributes) <= 1:
             attributes_string = f"attribute {''.join(missing_attributes)}"
         else:
-            attributes_string= f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
-        return source_name_string,attributes_string
+            attributes_string = f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
+        return source_name_string, attributes_string
 
     def map(
         self,
@@ -126,7 +140,15 @@ class Mapper:
                 else:
                     target_instance = object.__new__(target_type)
                     return self._setattr(target_instance, mapped_attrs, extra)
-            return target_type(**mapped_attrs, **(extra or {}))
+            return target_type(
+                **{
+                    k: v
+                    for k, v in mapped_attrs.items()
+                    if k
+                    in set(list(signature(target_type.__init__).parameters.keys())[1:])
+                },
+                **(extra or {}),
+            )
         except TypeError as e:
             self._handle_mapping_error(source_instance, target, e)
 
@@ -136,7 +158,7 @@ class Mapper:
             if isinstance(source_instance, Iterable)
             else source_instance if isclass(source_instance) else type(source_instance)
         )
-        
+
         return source_type
 
     def _get_source_props(
@@ -176,9 +198,11 @@ class Mapper:
         self, source_object, source_type: type[TT], target_type: type[TS]
     ) -> list[tuple]:
         if is_dataclass(target_type):
-            t_props = [field.name for field in fields(target_type)]
+            t_props_names = {field.name for field in fields(target_type)}
         else:
-            t_props = [t_prop[0] for t_prop in getmembers(target_type)]
+            t_props_names = {t_prop[0] for t_prop in getmembers(target_type)} | set(
+                list(signature(target_type.__init__).parameters.keys())[1:]
+            )
         return [
             s_prop
             for s_prop in getmembers(source_object)
@@ -186,7 +210,7 @@ class Mapper:
             # TODO: handle the exclusions after getting the prop in another place
             and not s_prop[0] in self.exclusions[source_type][target_type]
             # does not copy if prop not in target object
-            and s_prop[0] in t_props
+            # and s_prop[0] in t_props_names
         ]
 
     def _maps(self, maps: dict[str, Callable], props: Mapping) -> list[tuple]:
