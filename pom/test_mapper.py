@@ -965,3 +965,111 @@ class TestAdvancedMapping:
         b = mapper.map(a, Target)
         assert isinstance(b, Target)
         assert b.name == "ynnhoJ"
+
+    def test_invalid_transformation_function_raises_error(self, mapper):
+        """Test that invalid transformation functions raise appropriate errors."""
+
+        class Source:
+            def __init__(self, name: str):
+                self.name = name
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        def bad_transform(x):
+            raise ValueError("Bad transform")
+
+        source = Source("Johnny")
+        mapper.add_mapping(
+            source=Source, target=Target, mapping={"name": bad_transform}
+        )
+
+        with pytest.raises(ValueError, match="Bad transform"):
+            mapper.map(source, Target)
+
+    def test_none_value_in_mapping_preserves_none(self, mapper):
+        """Test that None values in source are preserved in mapping."""
+
+        class Source:
+            def __init__(self, name: str = None):
+                self.name = name
+
+        class Target:
+            def __init__(self, name: str = None):
+                self.name = name
+
+        source = Source(None)
+        mapper.add_mapping(source=Source, target=Target)
+        result = mapper.map(source, Target)
+
+        assert result.name is None
+
+    def test_mapping_with_inheritance(self, mapper):
+        """Test mapping works correctly with inherited attributes."""
+
+        class BaseSource:
+            def __init__(self, base_attr: str):
+                self.base_attr = base_attr
+
+        class Source(BaseSource):
+            def __init__(self, base_attr: str, name: str):
+                super().__init__(base_attr)
+                self.name = name
+
+        class Target:
+            def __init__(self, base_attr: str, name: str):
+                self.base_attr = base_attr
+                self.name = name
+
+        source = Source("base", "Johnny")
+        mapper.add_mapping(source=Source, target=Target)
+        result = mapper.map(source, Target)
+
+        assert result.base_attr == "base"
+        assert result.name == "Johnny"
+
+    def test_mapping_with_property_decorators(self, mapper):
+        """Test mapping handles @property decorators correctly."""
+
+        class Source:
+            def __init__(self, name: str):
+                self._name = name
+
+            @property
+            def name(self):
+                return self._name
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Johnny")
+        mapper.add_mapping(source=Source, target=Target)
+        result = mapper.map(source, Target)
+
+        assert result.name == "Johnny"
+
+    @pytest.mark.performance
+    def test_mapping_large_object_performance(self, mapper):
+        """Test mapping performance with large objects."""
+
+        class LargeSource:
+            def __init__(self):
+                for i in range(1000):
+                    setattr(self, f"attr_{i}", i)
+
+        class LargeTarget:
+            pass
+
+        source = LargeSource()
+        mapper.add_mapping(source=source, target=LargeTarget)
+
+        import time
+
+        start = time.time()
+        result = mapper.map(source, LargeTarget, skip_init=True)
+        duration = time.time() - start
+
+        assert duration < 1.0  # Should complete in under 1 second
+        assert all(getattr(result, f"attr_{i}") == i for i in range(1000))
