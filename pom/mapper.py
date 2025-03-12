@@ -4,7 +4,7 @@ from collections import ChainMap, defaultdict
 from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from functools import partial
-from inspect import getmembers, isclass, signature
+from inspect import Parameter, getmembers, isclass, signature
 from typing import (
     Any,
     Callable,
@@ -23,7 +23,7 @@ TT = TypeVar("TT")
 
 SourceType = Union[Type[TS], Tuple[Type[TS], ...]]
 TargetType = Type[TT]
-Source = Union[TS, Tuple[TS]]
+Source = Union[TS, Tuple[TS], SourceType]
 MapFunction = Callable[[Any], Any]
 MappingDict = Dict[str, Union[str, MapFunction]]
 MappingSpec = Union[MappingDict, List[str]]
@@ -87,20 +87,29 @@ class Mapper:
 
     def _format_missing_attrs_error_message(self, source, mapping_attrs):
         missing_attributes = sorted(mapping_attrs)
-        source_name = (
-            source.__name__ if isclass(source) else sorted({s.__name__ for s in source})
-        )
-        if len(source_name) <= 1:
+        source_name = self._get_source_name(source)
+        if isinstance(source_name, str):
             source_name_string = f"source {source_name}"
-        else:
+        elif isinstance(source_name, Iterable):
             source_name_string = (
                 f"sources {', '.join(source_name[:-1])} and {source_name[-1]}"
             )
+        else:
+            raise RuntimeError("Can't define source class name")
         if len(missing_attributes) <= 1:
             attributes_string = f"attribute {''.join(missing_attributes)}"
         else:
             attributes_string = f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
         return source_name_string, attributes_string
+
+    def _get_source_name(self, source: Source):
+        if isinstance(source, Iterable):
+            return sorted({s.__name__ for s in source})
+        if isclass(source):
+            return source.__name__
+        if isinstance(source, type) is False:
+            return type(source).__name__
+        raise RuntimeError("Can't define source class name")
 
     def map(
         self,
@@ -117,16 +126,22 @@ class Mapper:
             skip_init: Skip __init__ when creating target instance
             extra: Additional attributes to set on target instance
         """
+        extra = extra or {}
         target_is_type = isclass(target)
-        skip_init = skip_init or not target_is_type
         target_type: type[TT] = target if target_is_type else type(target)
+        skip_init = skip_init or not target_is_type
+        source_type = self._get_source_type(source_instance)
+
         # Get source properties
         props = self._get_source_props(
             source_instance, type(source_instance), target_type
         )
 
+        self._guard_no_missing_attrs(
+            source_instance, target_type, source_type, extra, target
+        )
+
         # Get mapping rules
-        source_type = self._get_source_type(source_instance)
         maps = self.mappings[source_type][target_type]
 
         # Apply mappings
@@ -152,6 +167,32 @@ class Mapper:
         except TypeError as e:
             self._handle_mapping_error(source_instance, target, e)
 
+    def _guard_no_missing_attrs(
+        self, source_instance, target_type, source_type, extra, target
+    ):
+        missing_prop = set(self.exclusions[source_type][target_type]) - set(
+            extra.keys()
+        )
+
+        target_attrs = self._get_target_attrs_without_default_values(
+            target_type, target
+        )
+
+        trouble_props = missing_prop & target_attrs
+        if not trouble_props:
+            return
+        source_name = self._get_source_name(source_instance)
+        if len(trouble_props) == 1:
+            raise RuntimeError(
+                f"{target_type.__name__} requires argument {trouble_props.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}"
+            )
+        if len(trouble_props) > 1:
+            sorted_trouble_props_names = sorted(trouble_props)
+            trouble_pros_names = f"{', '.join(sorted_trouble_props_names[:-1])} and {sorted_trouble_props_names[-1]}"
+            raise RuntimeError(
+                f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name}  -> {target_type.__name__}"
+            )
+
     def _get_source_type(self, source_instance):
         source_type = (
             tuple(so if isclass(so) else type(so) for so in source_instance)
@@ -172,7 +213,6 @@ class Mapper:
         return ChainMap(dict(self._get_props(source, source_type, target_type)))
 
     def _setattr(self, instance: TT, attrs: dict, extra: dict = None) -> TT:
-
         for name, value in attrs.items():
             setattr(instance, name, value)
         for name, value in (extra or {}).items():
@@ -197,12 +237,6 @@ class Mapper:
     def _get_props(
         self, source_object, source_type: type[TT], target_type: type[TS]
     ) -> list[tuple]:
-        if is_dataclass(target_type):
-            t_props_names = {field.name for field in fields(target_type)}
-        else:
-            t_props_names = {t_prop[0] for t_prop in getmembers(target_type)} | set(
-                list(signature(target_type.__init__).parameters.keys())[1:]
-            )
         return [
             s_prop
             for s_prop in getmembers(source_object)
@@ -212,6 +246,23 @@ class Mapper:
             # does not copy if prop not in target object
             # and s_prop[0] in t_props_names
         ]
+
+    def _get_target_attrs_without_default_values(self, target_type, target):
+        if is_dataclass(target_type):
+            t_props_names = {field.name for field in fields(target_type)}
+        else:
+            t_props_names = set(
+                list(
+                    name
+                    for name, param in signature(
+                        target_type.__init__
+                    ).parameters.items()
+                    # get only parameter without default value
+                    if param.default is Parameter.empty
+                )[1:]
+                # minus the parameters already in the target, like class attributes and already instantiated objects
+            ) - {t_prop[0] for t_prop in getmembers(target)}
+        return t_props_names
 
     def _maps(self, maps: dict[str, Callable], props: Mapping) -> list[tuple]:
         result = []
