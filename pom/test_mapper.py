@@ -16,13 +16,23 @@ def reversed_string():
 
 
 @pytest.fixture
-def simple_source_class():
-    class SourceClass:
+def simple_source_class_A():
+    class SourceClassA:
         def __init__(self, name: str, email: str):
             self.name = name
             self.email = email
 
-    return SourceClass
+    return SourceClassA
+
+
+@pytest.fixture
+def simple_source_class_B():
+    class SourceClassB:
+        def __init__(self, name: str, email: str):
+            self.name = name
+            self.email = email
+
+    return SourceClassB
 
 
 @pytest.fixture
@@ -43,11 +53,11 @@ def mapper():
 class TestBasicMapping:
     """Tests for basic mapping functionality."""
 
-    def test_simple_mapping(self, mapper, simple_source_class, simple_target_class):
+    def test_simple_mapping(self, mapper, simple_source_class_A, simple_target_class):
         """Most basic case: mapping between identical classes."""
-        source = simple_source_class("Johnny", "johnny@mail.com")
+        source = simple_source_class_A("Johnny", "johnny@mail.com")
 
-        mapper.add_mapping(source=simple_source_class, target=simple_target_class)
+        mapper.add_mapping(source=simple_source_class_A, target=simple_target_class)
         result = mapper.map(source, simple_target_class)
 
         assert isinstance(result, simple_target_class)
@@ -58,17 +68,17 @@ class TestBasicMapping:
     def test_mapping_with_transformation(
         self,
         mapper,
-        simple_source_class,
+        simple_source_class_A,
         simple_target_class,
         reversed_string,
         transform_name,
     ):
         """Test mapping with optional property transformation."""
-        source = simple_source_class("Johnny", "johnny@mail.com")
+        source = simple_source_class_A("Johnny", "johnny@mail.com")
 
         mapping = {"name": reversed_string} if transform_name else {}
         mapper.add_mapping(
-            source=simple_source_class, target=simple_target_class, mapping=mapping
+            source=simple_source_class_A, target=simple_target_class, mapping=mapping
         )
         result = mapper.map(source, simple_target_class)
 
@@ -88,16 +98,16 @@ class TestPropertyExclusion:
     def test_excluding_properties(
         self,
         mapper,
-        simple_source_class,
+        simple_source_class_A,
         simple_target_class,
         excluded_fields,
         expected_email,
     ):
         """Test that excluded properties are not mapped."""
-        source = simple_source_class("Johnny", "johnny@mail.com")
+        source = simple_source_class_A("Johnny", "johnny@mail.com")
 
         mapper.add_mapping(
-            source=simple_source_class,
+            source=simple_source_class_A,
             target=simple_target_class,
             exclusions=excluded_fields,
         )
@@ -106,33 +116,60 @@ class TestPropertyExclusion:
         assert result.email == expected_email
 
     @pytest.mark.parametrize(
-        "excluded_fields,expected_email",
+        "excluded_fields",
         [
-            (["email"], None),
+            ["email"],
         ],
     )
     def test_excluding_required_properties_raises_proper_error(
         self,
         mapper,
-        simple_source_class,
+        simple_source_class_A,
         simple_target_class,
         excluded_fields,
-        expected_email,
     ):
         """Test that excluded properties are not mapped."""
-        source = simple_source_class("Johnny", "johnny@mail.com")
+        source = simple_source_class_A("Johnny", "johnny@mail.com")
 
         mapper.add_mapping(
-            source=simple_source_class,
+            source=simple_source_class_A,
             target=simple_target_class,
             exclusions=excluded_fields,
         )
-        with pytest.raises(RuntimeError) as e:
-            result = mapper.map(source, simple_target_class)
-            assert (
-                str(e)
-                == "TargetClass requires argument email which is excluded from mapping SourceClass -> TargetClass"
-            )
+        with pytest.raises(
+            RuntimeError,
+            match="TargetClass requires argument email which is excluded from mapping SourceClassA -> TargetClass.",
+        ):
+            mapper.map(source, simple_target_class)
+
+    @pytest.mark.parametrize(
+        "excluded_fields",
+        [
+            ["email"],
+        ],
+    )
+    def test_excluding_required_properties_raises_proper_error_for_multiple_sources(
+        self,
+        mapper,
+        simple_source_class_A,
+        simple_source_class_B,
+        simple_target_class,
+        excluded_fields,
+    ):
+        """Test that excluded properties are not mapped."""
+        source_a = simple_source_class_A("Johnny", "johnny@mail.com")
+        source_b = simple_source_class_B("Johnny Well", "johnnywell@email.com")
+
+        mapper.add_mapping(
+            source=(simple_source_class_A, simple_source_class_B),
+            target=simple_target_class,
+            exclusions=excluded_fields,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="TargetClass requires argument email which is excluded from mapping \\(SourceClassA, SourceClassB\\) -> TargetClass.",
+        ):
+            mapper.map((source_a, source_b), simple_target_class)
 
 
 class TestDataclassMapping:
@@ -347,11 +384,11 @@ class TestAdvancedMapping:
         with multiple source classes specified as an iterable.
         """
 
-        class Source:
+        class SourceClassA:
             def __init__(self, email: str):
                 self.email = email
 
-        class Target:
+        class SourceClassB:
             def __init__(self, name: str, email: str):
                 self.name = name
                 self.email = email
@@ -361,16 +398,14 @@ class TestAdvancedMapping:
                 self.name = name
                 self.email = email
 
-        try:
+        with pytest.raises(
+            TypeError,
+            match="Mapping attributes age, job and name not found in source \\(SourceClassA, SourceClassB\\).",
+        ):
             mapper.add_mapping(
-                source=(Source, Target),
+                source=(SourceClassA, SourceClassB),
                 target=Target,
                 mapping={"name": reversed_string, "job": "job", "age": "age"},
-            )
-        except TypeError as e:
-            assert (
-                str(e)
-                == "Mapping attributes age, job and name not found in sources Source and Target."
             )
 
     def test_error_message_for_single_missing_attribute(self, mapper, reversed_string):

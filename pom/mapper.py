@@ -49,20 +49,35 @@ class Mapper:
         mapping: MappingSpec = None,
         exclusions: list = None,
     ):
-        self._guard_all_mappings_in_source(source, mapping)
+        self._guard_all_source_has_all_mapping_attrs(source, mapping)
         if isinstance(mapping, List):
             mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
         self.mappings[source_type][target].update(mapping or {})
         self.exclusions[source_type][target].extend(exclusions or [])
 
-    def _guard_all_mappings_in_source(self, source, mapping: MappingSpec):
+    def _guard_all_source_has_all_mapping_attrs(self, source, mapping: MappingSpec):
         if not mapping:
             return
+        mapping_attrs_names = self._get_mapping_attrs_names(mapping)
+        source_attrs_names = self._get_source_attrs_names(source)
+        missing_attributes = {
+            attr for attr in mapping_attrs_names if attr not in source_attrs_names
+        }
+
+        if missing_attributes:
+            self._raise_missing_attrs_error(source, missing_attributes)
+
+    def _get_mapping_attrs_names(self, mapping):
         if isinstance(mapping, Mapping):
-            mapping_attrs = mapping.keys()
-        if isinstance(mapping, List):
-            mapping_attrs = mapping
+            return mapping.keys()
+        if isinstance(mapping, Iterable):
+            return mapping
+        raise RuntimeError(
+            "Can't get mapping attributes names. Mapping expected to be a Dict or List like object"
+        )
+
+    def _get_source_attrs_names(self, source):
         if isinstance(source, Iterable):
             source_attrs = {m[0] for s in source for m in getmembers(s)} | {
                 m[0]
@@ -73,20 +88,11 @@ class Mapper:
             source_attrs = {m[0] for m in getmembers(source)} | set(
                 list(signature(source.__init__).parameters.keys())[1:]
             )
-        missing_attributes = {
-            attr for attr in mapping_attrs if attr not in source_attrs
-        }
 
-        if missing_attributes:
-            source_name_string, attributes_string = (
-                self._format_missing_attrs_error_message(source, mapping_attrs)
-            )
-            raise TypeError(
-                f"Mapping {attributes_string} not found in {source_name_string}."
-            )
+        return source_attrs
 
-    def _format_missing_attrs_error_message(self, source, mapping_attrs):
-        missing_attributes = sorted(mapping_attrs)
+    def _raise_missing_attrs_error(self, source, missing_attributes):
+        sorted_missing_attributes = sorted(missing_attributes)
         source_name = self._get_source_name(source)
         if isinstance(source_name, str):
             source_name_string = f"source {source_name}"
@@ -96,15 +102,20 @@ class Mapper:
             )
         else:
             raise RuntimeError("Can't define source class name")
-        if len(missing_attributes) <= 1:
-            attributes_string = f"attribute {''.join(missing_attributes)}"
+        if len(sorted_missing_attributes) <= 1:
+            attributes_string = f"attribute {''.join(sorted_missing_attributes)}"
         else:
-            attributes_string = f"attributes {', '.join(missing_attributes[:-1])} and {missing_attributes[-1]}"
-        return source_name_string, attributes_string
+            attributes_string = f"attributes {', '.join(sorted_missing_attributes[:-1])} and {sorted_missing_attributes[-1]}"
+        raise TypeError(
+            f"Mapping {attributes_string} not found in {source_name_string}."
+        )
 
     def _get_source_name(self, source: Source):
         if isinstance(source, Iterable):
-            return sorted({s.__name__ for s in source})
+            names = sorted(
+                [s.__name__ if isclass(s) else type(s).__name__ for s in source]
+            )
+            return f"({', '.join(names)})"
         if isclass(source):
             return source.__name__
         if isinstance(source, type) is False:
@@ -184,13 +195,13 @@ class Mapper:
         source_name = self._get_source_name(source_instance)
         if len(trouble_props) == 1:
             raise RuntimeError(
-                f"{target_type.__name__} requires argument {trouble_props.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}"
+                f"{target_type.__name__} requires argument {trouble_props.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}."
             )
         if len(trouble_props) > 1:
             sorted_trouble_props_names = sorted(trouble_props)
             trouble_pros_names = f"{', '.join(sorted_trouble_props_names[:-1])} and {sorted_trouble_props_names[-1]}"
             raise RuntimeError(
-                f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name}  -> {target_type.__name__}"
+                f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name} -> {target_type.__name__}."
             )
 
     def _get_source_type(self, source_instance):
