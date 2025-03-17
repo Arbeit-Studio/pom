@@ -90,7 +90,7 @@ class Mapper:
         map = self.mappings[source_type][target_type]
 
         # Apply mappings
-        mapped_attrs = dict(self._map(map, source_attrs))
+        mapped_attrs = self._map(map, source_attrs)
 
         return self._build_target(
             skip_init,
@@ -129,14 +129,21 @@ class Mapper:
             source_attrs = {m[0] for s in source for m in getmembers(s)} | {
                 m[0]
                 for s in source
-                for m in list(signature(s.__init__).parameters.keys())[1:]
+                for m in self._get_init_params_names(self._get_init_params(s))
             }
         else:
             source_attrs = {m[0] for m in getmembers(source)} | set(
-                list(signature(source.__init__).parameters.keys())[1:]
+                self._get_init_params_names(self._get_init_params(source))
             )
 
         return source_attrs
+
+    def _get_init_params(self, klass):
+        return {
+            (name, param)
+            for name, param in signature(klass.__init__).parameters.items()
+            if name != "self"
+        }
 
     def _raise_missing_attrs_error(self, source, missing_attributes):
         sorted_missing_attributes = sorted(missing_attributes)
@@ -196,7 +203,8 @@ class Mapper:
             **{
                 k: v
                 for k, v in mapped_attrs.items()
-                if k in set(list(signature(target_type.__init__).parameters.keys())[1:])
+                if k
+                in set(self._get_init_params_names(self._get_init_params(target_type)))
             },
             **(extra or {}),
         )
@@ -287,23 +295,30 @@ class Mapper:
 
     def _get_target_init_params_names_without_default_values(self, target_type, target):
 
-        t_props_names = self._get_init_params_names(target_type) - {
-            t_prop[0] for t_prop in self._get_public_attrs(target)
-        }
+        t_props_names = self._get_init_params_names(
+            self._filter_empty_params(self._get_init_params(target_type))
+        ) - {t_prop[0] for t_prop in self._get_public_attrs(target)}
 
         return t_props_names
 
-    def _get_init_params_names(self, target_type):
+    def _get_init_params_names(self, init_params):
         return set(
             list(
                 name
-                for name, param in signature(target_type.__init__).parameters.items()
+                for name, param in init_params
                 # get only parameter without default value
-                if param.default is Parameter.empty
-            )[1:]
+                # if param.default is Parameter.empty
+            )
         )
 
-    def _map(self, maps: dict[str, Callable], props: Mapping) -> list[tuple]:
+    def _filter_empty_params(self, init_params):
+        return {
+            (name, param)
+            for name, param in init_params
+            if param.default is Parameter.empty
+        }
+
+    def _map(self, maps: dict[str, Callable], props: Mapping) -> dict[str, Any]:
         result = []
         for prop_name, prop_value in props.items():
             transform = maps[prop_name]
@@ -315,4 +330,4 @@ class Mapper:
             if isinstance(transform, tuple):
                 result.append((transform[0], transform[1](prop_value)))
 
-        return result
+        return dict(result)

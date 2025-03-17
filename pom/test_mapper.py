@@ -26,6 +26,14 @@ def simple_source_class_A():
 
 
 @pytest.fixture
+def source_class_A_missing_attr():
+    class SourceClassA:
+        pass
+
+    return SourceClassA
+
+
+@pytest.fixture
 def simple_source_class_B():
     class SourceClassB:
         def __init__(self, name: str, email: str):
