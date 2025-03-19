@@ -77,20 +77,20 @@ class Mapper:
         skip_init = skip_init or not target_is_type
         source_type = self._get_source_type(source_instance)
 
-        # Get source properties
-        source_attrs = self._get_source_attrs(
-            source_instance, type(source_instance), target_type
-        )
-
-        self._guard_no_missing_attrs(
+        self._guard_no_required_attrs_excluded(
             source_instance, target_type, source_type, extra, target
         )
 
+        # Get source properties
+        source_attrs = self._build_source_attrs_chain_map(
+            source_instance, source_type, target_type
+        )
+
         # Get mapping rules
-        map = self.mappings[source_type][target_type]
+        mapping = self.mappings[source_type][target_type]
 
         # Apply mappings
-        mapped_attrs = self._map(map, source_attrs)
+        mapped_attrs = self._map(mapping, source_attrs)
 
         return self._build_target(
             skip_init,
@@ -209,43 +209,49 @@ class Mapper:
             **(extra or {}),
         )
 
-    def _guard_no_missing_attrs(
+    def _guard_no_required_attrs_excluded(
         self, source_instance, target_type, source_type, extra, target
     ):
-        missing_prop = set(self.exclusions[source_type][target_type]) - set(
+        missing_attrs_candidates = set(self.exclusions[source_type][target_type]) - set(
             extra.keys()
         )
 
-        target_attrs = self._get_target_init_params_names_without_default_values(
-            target_type, target
+        target_required_attrs = (
+            self._get_target_init_params_names_without_default_values(
+                target_type, target
+            )
         )
 
-        trouble_props = missing_prop & target_attrs
-        if not trouble_props:
-            return
-        source_name = self._get_source_class_name(source_instance)
-        if len(trouble_props) == 1:
-            raise RuntimeError(
-                f"{target_type.__name__} requires argument {trouble_props.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}."
+        missing_attrs = missing_attrs_candidates & target_required_attrs
+        if missing_attrs:
+            self._raise_required_attrs_excluded_error(
+                source_instance, target_type, missing_attrs
             )
-        if len(trouble_props) > 1:
-            sorted_trouble_props_names = sorted(trouble_props)
+
+    def _raise_required_attrs_excluded_error(
+        self, source_instance, target_type, missing_attrs
+    ):
+        source_name = self._get_source_class_name(source_instance)
+        if len(missing_attrs) == 1:
+            raise RuntimeError(
+                f"{target_type.__name__} requires argument {missing_attrs.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}."
+            )
+        if len(missing_attrs) > 1:
+            sorted_trouble_props_names = sorted(missing_attrs)
             trouble_pros_names = f"{', '.join(sorted_trouble_props_names[:-1])} and {sorted_trouble_props_names[-1]}"
             raise RuntimeError(
                 f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name} -> {target_type.__name__}."
             )
 
     def _get_source_type(self, source_instance):
-        source_type = (
+        return (
             tuple(so if isclass(so) else type(so) for so in source_instance)
             if isinstance(source_instance, Iterable)
             else source_instance if isclass(source_instance) else type(source_instance)
         )
 
-        return source_type
-
-    def _get_source_attrs(
-        self, source, source_type: type[TT], target_type: type[TS]
+    def _build_source_attrs_chain_map(
+        self, source, source_type: SourceType, target_type: TargetType
     ) -> ChainMap:
         """Extract properties from source object(s)."""
         if isinstance(source, Iterable):
@@ -256,7 +262,7 @@ class Mapper:
 
     def _select_attrs(self, source, source_type, target_type):
         return dict(
-            self._exclude_attrs(
+            self._filter_out_excluded_attrs(
                 self._get_public_attrs(source), source_type, target_type
             )
         )
@@ -286,7 +292,7 @@ class Mapper:
             s_prop for s_prop in getmembers(object) if not s_prop[0].startswith("_")
         ]
 
-    def _exclude_attrs(self, attrs, source_type, target_type):
+    def _filter_out_excluded_attrs(self, attrs, source_type, target_type):
         return [
             attr
             for attr in attrs
@@ -302,14 +308,7 @@ class Mapper:
         return t_props_names
 
     def _get_init_params_names(self, init_params):
-        return set(
-            list(
-                name
-                for name, param in init_params
-                # get only parameter without default value
-                # if param.default is Parameter.empty
-            )
-        )
+        return set(list(name for name, _ in init_params))
 
     def _filter_empty_params(self, init_params):
         return {
