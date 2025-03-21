@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import ChainMap, defaultdict
 from collections.abc import Iterable
-from dataclasses import fields, is_dataclass
 from functools import partial
 from inspect import Parameter, getmembers, isclass, signature
 from typing import (
@@ -49,7 +48,7 @@ class Mapper:
         mapping: MappingSpec = None,
         exclusions: list = None,
     ):
-        self._guard_all_source_has_all_mapping_attrs(source, mapping)
+        self._guard_source_has_all_attrs_specified_in_mapping(source, mapping)
         if isinstance(mapping, List):
             mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
@@ -102,7 +101,9 @@ class Mapper:
             source_instance,
         )
 
-    def _guard_all_source_has_all_mapping_attrs(self, source, mapping: MappingSpec):
+    def _guard_source_has_all_attrs_specified_in_mapping(
+        self, source, mapping: MappingSpec
+    ):
         if not mapping:
             return
 
