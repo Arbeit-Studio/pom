@@ -12,10 +12,12 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
+    cast,
 )
 
 TS = TypeVar("TS")
@@ -37,9 +39,13 @@ def prop():
 
 
 class Mapper:
-    def __init__(self):
-        self.mappings = defaultdict(partial(defaultdict, partial(defaultdict, prop)))
-        self.exclusions = defaultdict(partial(defaultdict, list))
+    def __init__(self) -> None:
+        self.mappings: Dict[
+            Union[Type, Tuple[Type, ...]], Dict[Type, Dict[str, Callable]]
+        ] = defaultdict(partial(defaultdict, partial(defaultdict, prop)))
+        self.exclusions: Dict[Union[Type, Tuple[Type, ...]], Dict[Type, List[str]]] = (
+            defaultdict(partial(defaultdict, list))
+        )
 
     def add_mapping(
         self,
@@ -47,8 +53,8 @@ class Mapper:
         source: Union[SourceType, TS],
         target: TargetType,
         mapping: Optional[MappingSpec] = None,
-        exclusions: Optional[list] = None,
-    ):
+        exclusions: Optional[List[str]] = None,
+    ) -> None:
         mapping = mapping or {}
         self._guard_source_has_all_attrs_specified_in_mapping(source, mapping)
         if isinstance(mapping, List):
@@ -95,7 +101,6 @@ class Mapper:
 
         return self._build_target(
             skip_init,
-            target_is_type,
             target,
             mapped_attrs,
             extra,
@@ -104,8 +109,8 @@ class Mapper:
         )
 
     def _guard_source_has_all_attrs_specified_in_mapping(
-        self, source, mapping: Optional[MappingSpec]
-    ):
+        self, source: Union[SourceType, TS], mapping: Optional[MappingSpec]
+    ) -> None:
         if not mapping:
             return
 
@@ -118,7 +123,7 @@ class Mapper:
         if missing_attributes:
             self._raise_missing_attrs_error(source, missing_attributes)
 
-    def _get_mapping_attrs_names(self, mapping):
+    def _get_mapping_attrs_names(self, mapping: MappingSpec) -> Set[str]:
         if isinstance(mapping, Mapping):
             return mapping.keys()
         if isinstance(mapping, Iterable):
@@ -127,7 +132,7 @@ class Mapper:
             "Can't get mapping attributes names. Mapping expected to be a Dict or List like object"
         )
 
-    def _get_source_attrs_names(self, source):
+    def _get_source_attrs_names(self, source: Union[SourceType, TS]) -> Set[str]:
         if isinstance(source, Iterable):
             return {
                 name
@@ -142,17 +147,19 @@ class Mapper:
             self._get_attrs_names(self._get_init_params(source))
         )
 
-    def _get_attrs_names(self, attrs):
+    def _get_attrs_names(self, attrs: Iterable[Tuple[str, Any]]) -> Set[str]:
         return {name for name, _ in attrs}
 
-    def _get_init_params(self, object):
+    def _get_init_params(self, obj: Union[Type, object]) -> Set[Tuple[str, Parameter]]:
         return {
             (name, param)
-            for name, param in signature(object.__init__).parameters.items()
+            for name, param in signature(obj.__init__).parameters.items()
             if name != "self"
         }
 
-    def _raise_missing_attrs_error(self, source, missing_attributes):
+    def _raise_missing_attrs_error(
+        self, source: Union[SourceType, TS], missing_attributes: Set[str]
+    ) -> NoReturn:
         sorted_missing_attributes = sorted(missing_attributes)
         source_name = self._get_source_class_name(source)
         if isinstance(source_name, str):
@@ -171,7 +178,7 @@ class Mapper:
             f"Mapping {attributes_string} not found in {source_name_string}."
         )
 
-    def _get_source_class_name(self, source: Source):
+    def _get_source_class_name(self, source: Union[SourceType, TS]) -> str:
         if isinstance(source, Iterable):
             names = sorted(
                 [s.__name__ if isclass(s) else type(s).__name__ for s in source]
@@ -185,18 +192,17 @@ class Mapper:
 
     def _build_target(
         self,
-        skip_init,
-        target_is_type,
-        target,
-        mapped_attrs,
-        extra,
-        target_type,
-        source_instance,
-    ):
+        skip_init: bool,
+        target: Union[TT, Type[TT]],
+        mapped_attrs: Dict[str, Any],
+        extra: Dict[str, Any],
+        target_type: Type[TT],
+        source_instance: Union[TS, Tuple[TS, ...]],
+    ) -> TT:
         # Create target instance
         try:
             if skip_init:
-                if not target_is_type:
+                if not isclass(target):
                     return self._set_attrs(target, mapped_attrs, extra)
                 else:
                     target_instance = object.__new__(target_type)
@@ -205,7 +211,12 @@ class Mapper:
         except TypeError as e:
             self._handle_mapping_error(source_instance, target, e)
 
-    def _initialize_target(self, mapped_attrs, extra, target_type):
+    def _initialize_target(
+        self,
+        mapped_attrs: Dict[str, Any],
+        extra: Dict[str, Any],
+        target_type: Type[TT],
+    ) -> TT:
         return target_type(
             **{
                 k: v
@@ -216,8 +227,13 @@ class Mapper:
         )
 
     def _guard_no_required_attrs_excluded(
-        self, source_instance, target_type, source_type, extra, target
-    ):
+        self,
+        source_instance: Union[TS, Tuple[TS, ...]],
+        target_type: Type[TT],
+        source_type: Union[Type[TS], Tuple[Type[TS], ...]],
+        extra: Dict[str, Any],
+        target: Union[TT, Type[TT]],
+    ) -> None:
         missing_attrs_candidates = set(self.exclusions[source_type][target_type]) - set(
             extra.keys()
         )
@@ -231,21 +247,26 @@ class Mapper:
             )
 
     def _raise_required_attrs_excluded_error(
-        self, source_instance, target_type, missing_attrs
-    ):
+        self,
+        source_instance: Union[TS, Tuple[TS, ...]],
+        target_type: Type[TT],
+        missing_attrs: Set[str],
+    ) -> NoReturn:
         source_name = self._get_source_class_name(source_instance)
         if len(missing_attrs) == 1:
             raise RuntimeError(
                 f"{target_type.__name__} requires argument {missing_attrs.pop()} which is excluded from mapping {source_name} -> {target_type.__name__}."
             )
-        if len(missing_attrs) > 1:
+        else:
             sorted_trouble_props_names = sorted(missing_attrs)
             trouble_pros_names = f"{', '.join(sorted_trouble_props_names[:-1])} and {sorted_trouble_props_names[-1]}"
             raise RuntimeError(
                 f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name} -> {target_type.__name__}."
             )
 
-    def _get_source_type(self, source_instance):
+    def _get_source_type(
+        self, source_instance: Union[TS, Tuple[TS, ...]]
+    ) -> Union[Type[TS], Tuple[Type[TS], ...]]:
         return (
             tuple(so if isclass(so) else type(so) for so in source_instance)
             if isinstance(source_instance, Iterable)
@@ -253,7 +274,10 @@ class Mapper:
         )
 
     def _build_source_attrs_chain_map(
-        self, source, source_type: SourceType, target_type: TargetType
+        self,
+        source: Union[TS, Tuple[TS, ...]],
+        source_type: Union[Type[TS], Tuple[Type[TS], ...]],
+        target_type: Type[TT],
     ) -> ChainMap:
         """Extract properties from source object(s)."""
         if isinstance(source, Iterable):
@@ -262,20 +286,30 @@ class Mapper:
             )
         return ChainMap(self._select_attrs(source, source_type, target_type))
 
-    def _select_attrs(self, source, source_type, target_type):
+    def _select_attrs(
+        self,
+        source: TS,
+        source_type: Union[Type[TS], Tuple[Type[TS], ...]],
+        target_type: Type[TT],
+    ) -> Dict[str, Any]:
         return dict(
             self._filter_out_excluded_attrs(
                 self._get_public_attrs(source), source_type, target_type
             )
         )
 
-    def _set_attrs(self, instance: TT, attrs: dict, extra) -> TT:
+    def _set_attrs(
+        self, instance: TT, attrs: Dict[str, Any], extra: Dict[str, Any]
+    ) -> TT:
         for name, value in {**attrs, **extra}.items():
             setattr(instance, name, value)
         return instance
 
     def _handle_mapping_error(
-        self, source, target_type: Type, error: TypeError
+        self,
+        source: Union[TS, Tuple[TS, ...]],
+        target_type: Type[TT],
+        error: TypeError,
     ) -> NoReturn:
         """Handle mapping errors with descriptive messages."""
         if isinstance(source, Iterable):
@@ -289,34 +323,42 @@ class Mapper:
             f"for target object {target_type.__name__}: {error}"
         )
 
-    def _get_public_attrs(self, object) -> list[tuple]:
-        return [
-            s_prop for s_prop in getmembers(object) if not s_prop[0].startswith("_")
-        ]
+    def _get_public_attrs(self, obj: object) -> List[Tuple[str, Any]]:
+        return [attr for attr in getmembers(obj) if not attr[0].startswith("_")]
 
-    def _filter_out_excluded_attrs(self, attrs, source_type, target_type):
+    def _filter_out_excluded_attrs(
+        self,
+        attrs: List[Tuple[str, Any]],
+        source_type: Union[Type[TS], Tuple[Type[TS], ...]],
+        target_type: Type[TT],
+    ) -> List[Tuple[str, Any]]:
         return [
             attr
             for attr in attrs
             if attr[0] not in self.exclusions[source_type][target_type]
         ]
 
-    def _get_target_required_init_params_names(self, target):
-
+    def _get_target_required_init_params_names(
+        self, target: Union[TT, Type[TT]]
+    ) -> Set[str]:
         t_props_names = self._get_attrs_names(
             self._filter_empty_params(self._get_init_params(target))
         ) - self._get_attrs_names(self._get_public_attrs(target))
 
         return t_props_names
 
-    def _filter_empty_params(self, init_params):
+    def _filter_empty_params(
+        self, init_params: Set[Tuple[str, Parameter]]
+    ) -> Set[Tuple[str, Parameter]]:
         return {
             (name, param)
             for name, param in init_params
             if param.default is Parameter.empty
         }
 
-    def _map(self, maps: dict[str, Callable], props: Mapping) -> dict[str, Any]:
+    def _map(
+        self, maps: Dict[str, Callable], props: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         result = []
         for prop_name, prop_value in props.items():
             transform = maps[prop_name]
