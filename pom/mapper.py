@@ -11,6 +11,7 @@ from typing import (
     List,
     Mapping,
     NoReturn,
+    Optional,
     Tuple,
     Type,
     TypeVar,
@@ -22,7 +23,7 @@ TT = TypeVar("TT")
 
 SourceType = Union[Type[TS], Tuple[Type[TS], ...]]
 TargetType = Type[TT]
-Source = Union[TS, Tuple[TS], SourceType]
+Source = Union[TS, Tuple[TS]]
 MapFunction = Callable[[Any], Any]
 MappingDict = Dict[str, Union[str, MapFunction]]
 MappingSpec = Union[MappingDict, List[str]]
@@ -45,9 +46,10 @@ class Mapper:
         *,
         source: Union[SourceType, TS],
         target: TargetType,
-        mapping: MappingSpec = None,
-        exclusions: list = None,
+        mapping: Optional[MappingSpec] = None,
+        exclusions: Optional[list] = None,
     ):
+        mapping = mapping or {}
         self._guard_source_has_all_attrs_specified_in_mapping(source, mapping)
         if isinstance(mapping, List):
             mapping = {name: name for name in mapping}
@@ -57,16 +59,16 @@ class Mapper:
 
     def map(
         self,
-        source_instance: TS,
+        source: Source,
         target: Union[TT, type[TT]],
         skip_init: bool = False,
-        extra: dict = None,
+        extra: Optional[dict] = None,
     ) -> TT:
         """Map source object(s) to target type.
 
         Args:
             source: Single object or iterable of objects to map from
-            target_type: Type to map to
+            target: Type to map to
             skip_init: Skip __init__ when creating target instance
             extra: Additional attributes to set on target instance
         """
@@ -74,15 +76,15 @@ class Mapper:
         target_is_type = isclass(target)
         target_type: type[TT] = target if target_is_type else type(target)
         skip_init = skip_init or not target_is_type
-        source_type = self._get_source_type(source_instance)
+        source_type = self._get_source_type(source)
 
         self._guard_no_required_attrs_excluded(
-            source_instance, target_type, source_type, extra, target
+            source, target_type, source_type, extra, target
         )
 
         # Get source properties
         source_attrs = self._build_source_attrs_chain_map(
-            source_instance, source_type, target_type
+            source, source_type, target_type
         )
 
         # Get mapping rules
@@ -98,17 +100,17 @@ class Mapper:
             mapped_attrs,
             extra,
             target_type,
-            source_instance,
+            source,
         )
 
     def _guard_source_has_all_attrs_specified_in_mapping(
-        self, source, mapping: MappingSpec
+        self, source, mapping: Optional[MappingSpec]
     ):
         if not mapping:
             return
 
         mapping_attrs_names = self._get_mapping_attrs_names(mapping)
-        source_attrs_names = self._get_attrs_names(source)
+        source_attrs_names = self._get_source_attrs_names(source)
         missing_attributes = {
             attr for attr in mapping_attrs_names if attr not in source_attrs_names
         }
@@ -125,24 +127,28 @@ class Mapper:
             "Can't get mapping attributes names. Mapping expected to be a Dict or List like object"
         )
 
-    def _get_attrs_names(self, source):
+    def _get_source_attrs_names(self, source):
         if isinstance(source, Iterable):
-            source_attrs = {m[0] for s in source for m in getmembers(s)} | {
-                m[0]
+            return {
+                name
                 for s in source
-                for m in self._get_init_params_names(self._get_init_params(s))
+                for name in self._get_attrs_names(self._get_public_attrs(s))
+            } | {
+                name
+                for s in source
+                for name in self._get_attrs_names(self._get_init_params(s))
             }
-        else:
-            source_attrs = {m[0] for m in getmembers(source)} | set(
-                self._get_init_params_names(self._get_init_params(source))
-            )
+        return self._get_attrs_names(self._get_public_attrs(source)) | set(
+            self._get_attrs_names(self._get_init_params(source))
+        )
 
-        return source_attrs
+    def _get_attrs_names(self, attrs):
+        return {name for name, _ in attrs}
 
-    def _get_init_params(self, klass):
+    def _get_init_params(self, object):
         return {
             (name, param)
-            for name, param in signature(klass.__init__).parameters.items()
+            for name, param in signature(object.__init__).parameters.items()
             if name != "self"
         }
 
@@ -204,10 +210,9 @@ class Mapper:
             **{
                 k: v
                 for k, v in mapped_attrs.items()
-                if k
-                in set(self._get_init_params_names(self._get_init_params(target_type)))
+                if k in set(self._get_attrs_names(self._get_init_params(target_type)))
             },
-            **(extra or {}),
+            **extra,
         )
 
     def _guard_no_required_attrs_excluded(
@@ -217,11 +222,7 @@ class Mapper:
             extra.keys()
         )
 
-        target_required_attrs = (
-            self._get_target_init_params_names_without_default_values(
-                target_type, target
-            )
-        )
+        target_required_attrs = self._get_target_required_init_params_names(target)
 
         missing_attrs = missing_attrs_candidates & target_required_attrs
         if missing_attrs:
@@ -268,8 +269,8 @@ class Mapper:
             )
         )
 
-    def _set_attrs(self, instance: TT, attrs: dict, extra: dict = None) -> TT:
-        for name, value in {**attrs, **(extra or {})}.items():
+    def _set_attrs(self, instance: TT, attrs: dict, extra) -> TT:
+        for name, value in {**attrs, **extra}.items():
             setattr(instance, name, value)
         return instance
 
@@ -300,16 +301,13 @@ class Mapper:
             if attr[0] not in self.exclusions[source_type][target_type]
         ]
 
-    def _get_target_init_params_names_without_default_values(self, target_type, target):
+    def _get_target_required_init_params_names(self, target):
 
-        t_props_names = self._get_init_params_names(
-            self._filter_empty_params(self._get_init_params(target_type))
-        ) - {t_prop[0] for t_prop in self._get_public_attrs(target)}
+        t_props_names = self._get_attrs_names(
+            self._filter_empty_params(self._get_init_params(target))
+        ) - self._get_attrs_names(self._get_public_attrs(target))
 
         return t_props_names
-
-    def _get_init_params_names(self, init_params):
-        return set(list(name for name, _ in init_params))
 
     def _filter_empty_params(self, init_params):
         return {

@@ -408,7 +408,7 @@ class TestAdvancedMapping:
 
         with pytest.raises(
             TypeError,
-            match="Mapping attributes age, job and name not found in source \\(SourceClassA, SourceClassB\\).",
+            match="Mapping attributes age and job not found in source \\(SourceClassA, SourceClassB\\).",
         ):
             mapper.add_mapping(
                 source=(SourceClassA, SourceClassB),
@@ -1116,3 +1116,21 @@ class TestAdvancedMapping:
 
         assert duration < 1.0  # Should complete in under 1 second
         assert all(getattr(result, f"attr_{i}") == i for i in range(1000))
+
+    def test_mapping_with_none_extra(self, mapper):
+        """Test that mapping works correctly when extra parameter is None."""
+
+        class Source:
+            def __init__(self, name: str):
+                self.name = name
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Johnny")
+        mapper.add_mapping(source=Source, target=Target)
+
+        result = mapper.map(source, Target, extra=None)
+        assert isinstance(result, Target)
+        assert result.name == "Johnny"
