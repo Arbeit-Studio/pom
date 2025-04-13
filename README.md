@@ -4,6 +4,72 @@
 
 This library is currently in alpha. While the core API is mostly stable and unlikely to change significantly before the final release, the project is still under development and has limited real-world usage. Bugs, crashes, or unexpected behavior may occur.
 
+## 📘 Overview
+
+We're excited to announce the first alpha release of **Python Object Mapper (POM)**, a flexible and powerful object mapping library for Python.
+
+## 🚀 Features
+
+### Core Mapping Capabilities
+
+- ✨ Map attributes between objects with identical property names
+- 🔄 Support for Python `dataclasses`
+- 🔍 Automatic handling of public attributes and initialization parameters
+- ⚡️ Smart type detection and validation
+
+### Advanced Mapping Features
+
+- 🛠 Transform property values using custom functions
+- 🔄 Map properties with different names between objects
+- 🔗 Map from multiple source objects to a single target
+- 🚫 Support for property exclusions
+- ➕ Add extra properties during mapping
+- ⏩ Skip initialization when needed
+
+### Flexible Configuration
+
+- ⛓ Chain-based attribute resolution
+- 🎯 Support for both class and instance-based mapping
+- 💾 Default value preservation
+- 🏷 Property decorator support
+
+### Error Handling
+
+- 📝 Descriptive error messages for missing attributes
+- ✅ Validation of mapping configurations
+- 🛡 Guards against excluded required attributes
+- ❌ Clear error messages for mapping failures
+
+## 📦 Installation
+
+```shell
+pip install git+https://github.com/Arbeit-Studio/pom.git
+```
+
+### 🔧 Requirements
+
+- Python 3.9 or higher
+
+## ⚠️ Known Limitations
+
+- Alpha release — API may change before final release
+- Limited real-world testing
+- Performance optimization pending for large object mappings
+
+## 🤝 Contributing
+
+We welcome contributions! Please check our [GitHub repository](https://github.com/Arbeit-Studio/pom) for guidelines.
+
+## 📄 License
+
+Apache License 2.0
+
+---
+
+For usage examples and detailed documentation, please refer to the [README.md](https://github.com/Arbeit-Studio/pom#readme).
+
+> **Note:** This is an alpha release. Please report any issues on our GitHub repository.
+
 ## Quick Start
 
 Sample classes.
