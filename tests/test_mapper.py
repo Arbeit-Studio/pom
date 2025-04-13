@@ -1134,3 +1134,59 @@ class TestAdvancedMapping:
         result = mapper.map(source, Target, extra=None)
         assert isinstance(result, Target)
         assert result.name == "Johnny"
+
+    def test_extra_parameter_overrides_source_attribute(self, mapper):
+        """Test that extra parameters take precedence over source attributes."""
+
+        class Source:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        class Target:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        source = Source("Johnny", "johnny@mail.com")
+        mapper.add_mapping(source=Source, target=Target)
+
+        # Extra parameter overrides source's email
+        result = mapper.map(source, Target, extra={"email": "override@email.com"})
+
+        assert isinstance(result, Target)
+        assert result.name == source.name  # Not overridden
+        assert result.email == "override@email.com"  # Overridden by extra
+
+    @pytest.mark.parametrize(
+        "sources,expected_age",
+        [
+            (lambda a, b: (b, a), lambda b, _: b.age),  # (source_b, source_a)
+            (lambda a, b: (a, b), lambda _, a: a.age),  # (source_a, source_b)
+        ],
+    )
+    def test_mapping_from_multiple_sources_to_source_type(
+        self, mapper, sources, expected_age
+    ):
+        """
+        Test mapping from multiple sources where target type matches one of the sources.
+
+        Verifies that mapping works correctly when target class is same as one of source classes.
+        """
+
+        class SourceA:
+            def __init__(self, name: str, age: int = None):
+                self.name = name
+                self.age = age
+
+        class SourceB:
+            def __init__(self, age: int):
+                self.age = age
+
+        source_a = SourceA("Johnny", 25)
+        source_b = SourceB(30)
+
+        mapper.add_mapping(source=(SourceB, SourceA), target=SourceA)
+        result = mapper.map(sources(source_a, source_b), SourceA)
+
+        assert result.age == expected_age(source_b, source_a)

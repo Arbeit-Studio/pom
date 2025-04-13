@@ -99,11 +99,12 @@ class Mapper:
         # Apply mappings
         mapped_attrs = self._map(mapping, source_attrs)
 
+        resulting_attrs = ChainMap(extra, mapped_attrs)
+
         return self._build_target(
             skip_init,
             target,
-            mapped_attrs,
-            extra,
+            resulting_attrs,
             target_type,
             source,
         )
@@ -194,8 +195,7 @@ class Mapper:
         self,
         skip_init: bool,
         target: Union[TT, Type[TT]],
-        mapped_attrs: Dict[str, Any],
-        extra: Dict[str, Any],
+        mapped_attrs: Mapping[str, Any],
         target_type: Type[TT],
         source_instance: Union[TS, Tuple[TS, ...]],
     ) -> TT:
@@ -203,18 +203,17 @@ class Mapper:
         try:
             if skip_init:
                 if not isclass(target):
-                    return self._set_attrs(target, mapped_attrs, extra)
+                    return self._set_attrs(target, mapped_attrs)
                 else:
                     target_instance = object.__new__(target_type)
-                    return self._set_attrs(target_instance, mapped_attrs, extra)
-            return self._initialize_target(mapped_attrs, extra, target_type)
+                    return self._set_attrs(target_instance, mapped_attrs)
+            return self._initialize_target(mapped_attrs, target_type)
         except TypeError as e:
             self._handle_mapping_error(source_instance, target, e)
 
     def _initialize_target(
         self,
-        mapped_attrs: Dict[str, Any],
-        extra: Dict[str, Any],
+        mapped_attrs: Mapping[str, Any],
         target_type: Type[TT],
     ) -> TT:
         return target_type(
@@ -223,7 +222,6 @@ class Mapper:
                 for k, v in mapped_attrs.items()
                 if k in set(self._get_attrs_names(self._get_init_params(target_type)))
             },
-            **extra,
         )
 
     def _guard_no_required_attrs_excluded(
@@ -298,10 +296,8 @@ class Mapper:
             )
         )
 
-    def _set_attrs(
-        self, instance: TT, attrs: Dict[str, Any], extra: Dict[str, Any]
-    ) -> TT:
-        for name, value in {**attrs, **extra}.items():
+    def _set_attrs(self, instance: TT, attrs: Mapping[str, Any]) -> TT:
+        for name, value in attrs.items():
             setattr(instance, name, value)
         return instance
 
