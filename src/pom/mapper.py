@@ -20,6 +20,11 @@ from typing import (
     cast,
 )
 
+try:
+    from pydantic import BaseModel
+except ImportError:
+    BaseModel = None
+
 TS = TypeVar("TS")
 TT = TypeVar("TT")
 
@@ -29,6 +34,81 @@ Source = Union[TS, Tuple[TS]]
 MapFunction = Callable[[Any], Any]
 MappingDict = Dict[str, Union[str, MapFunction]]
 MappingSpec = Union[MappingDict, List[str]]
+
+
+class PydanticBaseModelAdapter:
+    def __init__(self, BaseModel: Type) -> None:
+        self.BaseModel = BaseModel
+
+    def get_public_attrs(self, obj: Any) -> List[Tuple[str, Any]]:
+        # Use BaseModel.dict for field extraction
+        if isclass(obj) and issubclass(obj, self.BaseModel):
+            # When passed a BaseModel class, return its __fields__ names with None as values.
+            return [(field, None) for field in obj.__fields__.keys()]
+        elif isinstance(obj, self.BaseModel):
+            # For BaseModel instances, use dict() to extract field values.
+            return list(obj.dict(exclude_unset=True).items())
+
+    def get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
+        if isclass(obj):
+            return {(name, None) for name in obj.__fields__.keys()}
+        return {(name, None) for name in type(obj).__fields__.keys()}
+
+    def get_source_attrs_names(self, source: Any) -> Set[str]:
+        # Aggregate attributes using get_public_attrs and get_init_params
+        pub = self.get_public_attrs(source)
+        init = self.get_init_params(source)
+        return {name for name, _ in pub} | {name for name, _ in init}
+
+    def get_source_type(self, source_instance: Any) -> Type:
+        return (
+            type(source_instance) if not isclass(source_instance) else source_instance
+        )
+
+    def filter_empty_params(
+        self, init_params: Set[Tuple[str, Parameter]]
+    ) -> Set[Tuple[str, Parameter]]:
+        return {(name, param) for name, param in init_params if param is None}
+
+
+class POPOAdapter:
+    def get_public_attrs(self, obj: Any) -> List[Tuple[str, Any]]:
+        return [attr for attr in getmembers(obj) if not attr[0].startswith("_")]
+
+    def get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
+        return {
+            (name, param)
+            for name, param in signature(obj.__init__).parameters.items()
+            if name != "self"
+        }
+
+    def get_source_attrs_names(self, source: Any) -> Set[str]:
+        if isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
+            names = set()
+            for s in source:
+                pub = self.get_public_attrs(s)
+                init = self.get_init_params(s)
+                names |= {name for name, _ in pub} | {name for name, _ in init}
+            return names
+        pub = self.get_public_attrs(source)
+        init = self.get_init_params(source)
+        return {name for name, _ in pub} | {name for name, _ in init}
+
+    def get_source_type(self, source_instance: Any) -> Type:
+        return (
+            tuple(so if isclass(so) else type(so) for so in source_instance)
+            if isinstance(source_instance, Iterable)
+            else source_instance if isclass(source_instance) else type(source_instance)
+        )
+
+    def filter_empty_params(
+        self, init_params: Set[Tuple[str, Parameter]]
+    ) -> Set[Tuple[str, Parameter]]:
+        return {
+            (name, param)
+            for name, param in init_params
+            if param.default is Parameter.empty
+        }
 
 
 def prop():
@@ -46,6 +126,18 @@ class Mapper:
         self.exclusions: Dict[Union[Type, Tuple[Type, ...]], Dict[Type, List[str]]] = (
             defaultdict(partial(defaultdict, list))
         )
+        if BaseModel is not None:
+            self.base_model_adapter = PydanticBaseModelAdapter(BaseModel)
+        else:
+            self.base_model_adapter = None
+        self.object_adapter = POPOAdapter()
+
+    def _get_adapter(self, obj: Any):
+        if BaseModel is not None and (
+            isinstance(obj, BaseModel) or (isclass(obj) and issubclass(obj, BaseModel))
+        ):
+            return self.base_model_adapter
+        return self.object_adapter
 
     def add_mapping(
         self,
@@ -133,30 +225,16 @@ class Mapper:
             "Can't get mapping attributes names. Mapping expected to be a Dict or List like object"
         )
 
-    def _get_source_attrs_names(self, source: Union[SourceType, TS]) -> Set[str]:
-        if isinstance(source, Iterable):
-            return {
-                name
-                for s in source
-                for name in self._get_attrs_names(self._get_public_attrs(s))
-            } | {
-                name
-                for s in source
-                for name in self._get_attrs_names(self._get_init_params(s))
-            }
-        return self._get_attrs_names(self._get_public_attrs(source)) | set(
-            self._get_attrs_names(self._get_init_params(source))
-        )
+    def _get_source_attrs_names(self, source: Any) -> Set[str]:
+        adapter = self._get_adapter(source)
+        return adapter.get_source_attrs_names(source)
 
     def _get_attrs_names(self, attrs: Iterable[Tuple[str, Any]]) -> Set[str]:
         return {name for name, _ in attrs}
 
-    def _get_init_params(self, obj: Union[Type, object]) -> Set[Tuple[str, Parameter]]:
-        return {
-            (name, param)
-            for name, param in signature(obj.__init__).parameters.items()
-            if name != "self"
-        }
+    def _get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
+        adapter = self._get_adapter(obj)
+        return adapter.get_init_params(obj)
 
     def _raise_missing_attrs_error(
         self, source: Union[SourceType, TS], missing_attributes: Set[str]
@@ -262,14 +340,9 @@ class Mapper:
                 f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name} -> {target_type.__name__}."
             )
 
-    def _get_source_type(
-        self, source_instance: Union[TS, Tuple[TS, ...]]
-    ) -> Union[Type[TS], Tuple[Type[TS], ...]]:
-        return (
-            tuple(so if isclass(so) else type(so) for so in source_instance)
-            if isinstance(source_instance, Iterable)
-            else source_instance if isclass(source_instance) else type(source_instance)
-        )
+    def _get_source_type(self, source_instance: Any) -> Type:
+        adapter = self._get_adapter(source_instance)
+        return adapter.get_source_type(source_instance)
 
     def _build_source_attrs_chain_map(
         self,
@@ -278,6 +351,18 @@ class Mapper:
         target_type: Type[TT],
     ) -> ChainMap:
         """Extract properties from source object(s)."""
+        try:
+            from pydantic import BaseModel
+        except ImportError:
+            BaseModel = None
+
+        # If source is a BaseModel instance or a BaseModel class, treat it as a single object.
+        if BaseModel is not None:
+            if isinstance(source, BaseModel) or (
+                isclass(source) and issubclass(source, BaseModel)
+            ):
+                return ChainMap(self._select_attrs(source, source_type, target_type))
+
         if isinstance(source, Iterable):
             return ChainMap(
                 *[self._select_attrs(so, source_type, target_type) for so in source]
@@ -319,8 +404,9 @@ class Mapper:
             f"for target object {target_type.__name__}: {error}"
         )
 
-    def _get_public_attrs(self, obj: object) -> List[Tuple[str, Any]]:
-        return [attr for attr in getmembers(obj) if not attr[0].startswith("_")]
+    def _get_public_attrs(self, obj: Any) -> List[Tuple[str, Any]]:
+        adapter = self._get_adapter(obj)
+        return adapter.get_public_attrs(obj)
 
     def _filter_out_excluded_attrs(
         self,
@@ -349,7 +435,7 @@ class Mapper:
         return {
             (name, param)
             for name, param in init_params
-            if param.default is Parameter.empty
+            if param is None or param.default is Parameter.empty
         }
 
     def _map(

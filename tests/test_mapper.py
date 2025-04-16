@@ -1,8 +1,9 @@
 from contextlib import nullcontext as does_not_raise
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import pytest
+from pydantic import BaseModel
 
 from pom import Mapper
 
@@ -1190,3 +1191,31 @@ class TestAdvancedMapping:
         result = mapper.map(sources(source_a, source_b), SourceA)
 
         assert result.age == expected_age(source_b, source_a)
+
+
+class TestPydanticMapping:
+
+    def test_mapping_with_pydantic_models(self, mapper, reversed_string):
+        """Test mapping between Pydantic models with validation."""
+
+        class SourceModel(BaseModel):
+            name: str
+            email: str
+            age: Optional[int] = None
+
+        class TargetModel(BaseModel):
+            name: str
+            email: str
+            age: Optional[int] = None
+
+        source = SourceModel(name="Johnny", email="johnny@mail.com", age=30)
+
+        mapper.add_mapping(
+            source=SourceModel, target=TargetModel, mapping={"name": reversed_string}
+        )
+        result = mapper.map(source, TargetModel)
+
+        assert isinstance(result, TargetModel)
+        assert result.name == "ynnhoJ"
+        assert result.email == source.email
+        assert result.age == source.age
