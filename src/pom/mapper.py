@@ -425,6 +425,9 @@ class Mapper:
         return {
             (name, param)
             for name, param in init_params
+            # 'None' is used as a placeholder for Pydantic models in init_params to indicate
+            # that a parameter is missing or uninitialized. This allows us to filter out
+            # such parameters by checking 'param is None'.
             if param is None or param.default is Parameter.empty
         }
 
