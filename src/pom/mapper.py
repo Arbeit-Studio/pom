@@ -32,7 +32,7 @@ TargetType = Type[TT]
 Source = Union[TS, Tuple[TS]]
 MapFunction = Callable[[Any], Any]
 MappingDict = Dict[str, Union[str, MapFunction]]
-MappingSpec = Union[MappingDict, List[str]]
+MappingSpec = Union[MappingDict, Set[str]]
 
 
 class PydanticBaseModelAdapter:
@@ -123,9 +123,7 @@ def prop():
 class Mapper:
     def __init__(self) -> None:
         self.mappings = defaultdict(partial(defaultdict, partial(defaultdict, prop)))
-        self.exclusions: Dict[Union[Type, Tuple[Type, ...]], Dict[Type, List[str]]] = (
-            defaultdict(partial(defaultdict, list))
-        )
+        self.exclusions = defaultdict(partial(defaultdict, list))
 
     @staticmethod
     def _get_adapter(obj: Any):
@@ -141,7 +139,7 @@ class Mapper:
         source: Union[SourceType, TS],
         target: TargetType,
         mapping: Optional[MappingSpec] = None,
-        exclusions: Optional[List[str]] = None,
+        exclusions: Optional[Set[str]] = None,
     ) -> None:
         mapping = mapping or {}
         self._guard_source_has_all_attrs_specified_in_mapping(source, mapping)
@@ -149,7 +147,7 @@ class Mapper:
             mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
         self.mappings[source_type][target].update(mapping or {})
-        self.exclusions[source_type][target].extend(exclusions or [])
+        self.exclusions[source_type][target].extend(exclusions or set())
 
     def map(
         self,

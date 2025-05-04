@@ -353,7 +353,7 @@ Parameters:
 - `source`: Source class or tuple of source classes
 - `target`: Target class
 - `mapping`: Dict of property mappings or list of property names
-- `exclusions`: List of properties to exclude from mapping
+- `exclusions`: Set of properties names to exclude from mapping
 
 ##### `map(source, target, skip_init=False, extra=None)`
 
