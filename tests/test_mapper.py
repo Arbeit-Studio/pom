@@ -929,7 +929,7 @@ class TestAdvancedMapping:
             "my street nº 777",
             ["churrasco", "pizza"],
         )
-        mapper.add_mapping(source=a, target=Target, mapping=["name", "favorite_food"])
+        mapper.add_mapping(source=a, target=Target, mapping={"name", "favorite_food"})
         b = mapper.map(a, Target)
 
         assert isinstance(b, Target)

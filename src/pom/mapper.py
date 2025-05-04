@@ -17,7 +17,6 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    cast,
 )
 
 try:
@@ -48,6 +47,9 @@ class PydanticBaseModelAdapter:
         elif isinstance(obj, self.BaseModel):
             # For BaseModel instances, use dict() to extract field values.
             return list(obj.dict(exclude_unset=True).items())
+        raise TypeError(
+            f"Expected a BaseModel instance or class, got {type(obj).__name__}"
+        )
 
     def get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
         if isclass(obj):
@@ -94,7 +96,7 @@ class POPOAdapter:
         init = self.get_init_params(source)
         return {name for name, _ in pub} | {name for name, _ in init}
 
-    def get_source_type(self, source_instance: Any) -> Type:
+    def get_source_type(self, source_instance: Any) -> SourceType:
         return (
             tuple(so if isclass(so) else type(so) for so in source_instance)
             if isinstance(source_instance, Iterable)
@@ -120,24 +122,18 @@ def prop():
 
 class Mapper:
     def __init__(self) -> None:
-        self.mappings: Dict[
-            Union[Type, Tuple[Type, ...]], Dict[Type, Dict[str, Callable]]
-        ] = defaultdict(partial(defaultdict, partial(defaultdict, prop)))
+        self.mappings = defaultdict(partial(defaultdict, partial(defaultdict, prop)))
         self.exclusions: Dict[Union[Type, Tuple[Type, ...]], Dict[Type, List[str]]] = (
             defaultdict(partial(defaultdict, list))
         )
-        if BaseModel is not None:
-            self.base_model_adapter = PydanticBaseModelAdapter(BaseModel)
-        else:
-            self.base_model_adapter = None
-        self.object_adapter = POPOAdapter()
 
-    def _get_adapter(self, obj: Any):
+    @staticmethod
+    def _get_adapter(obj: Any):
         if BaseModel is not None and (
             isinstance(obj, BaseModel) or (isclass(obj) and issubclass(obj, BaseModel))
         ):
-            return self.base_model_adapter
-        return self.object_adapter
+            return PydanticBaseModelAdapter(BaseModel)
+        return POPOAdapter()
 
     def add_mapping(
         self,
@@ -149,7 +145,7 @@ class Mapper:
     ) -> None:
         mapping = mapping or {}
         self._guard_source_has_all_attrs_specified_in_mapping(source, mapping)
-        if isinstance(mapping, List):
+        if isinstance(mapping, Set):
             mapping = {name: name for name in mapping}
         source_type = self._get_source_type(source)
         self.mappings[source_type][target].update(mapping or {})
@@ -218,9 +214,9 @@ class Mapper:
 
     def _get_mapping_attrs_names(self, mapping: MappingSpec) -> Set[str]:
         if isinstance(mapping, Mapping):
-            return mapping.keys()
+            return set(mapping.keys())
         if isinstance(mapping, Iterable):
-            return mapping
+            return set(mapping)
         raise RuntimeError(
             "Can't get mapping attributes names. Mapping expected to be a Dict or List like object"
         )
@@ -287,7 +283,7 @@ class Mapper:
                     return self._set_attrs(target_instance, mapped_attrs)
             return self._initialize_target(mapped_attrs, target_type)
         except TypeError as e:
-            self._handle_mapping_error(source_instance, target, e)
+            self._handle_mapping_error(source_instance, target_type, e)
 
     def _initialize_target(
         self,
@@ -340,7 +336,7 @@ class Mapper:
                 f"{target_type.__name__} requires arguments {trouble_pros_names} which are excluded from mapping {source_name} -> {target_type.__name__}."
             )
 
-    def _get_source_type(self, source_instance: Any) -> Type:
+    def _get_source_type(self, source_instance: Any) -> SourceType:
         adapter = self._get_adapter(source_instance)
         return adapter.get_source_type(source_instance)
 
@@ -351,12 +347,8 @@ class Mapper:
         target_type: Type[TT],
     ) -> ChainMap:
         """Extract properties from source object(s)."""
-        try:
-            from pydantic import BaseModel
-        except ImportError:
-            BaseModel = None
 
-        # If source is a BaseModel instance or a BaseModel class, treat it as a single object.
+        # This is necessary because BaseModel instances are iterables, but we want to treat them as single objects.
         if BaseModel is not None:
             if isinstance(source, BaseModel) or (
                 isclass(source) and issubclass(source, BaseModel)
