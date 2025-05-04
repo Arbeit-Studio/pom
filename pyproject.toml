@@ -18,6 +18,7 @@ pytest = "^8.3.5"
 debugpy = "^1.8.13"
 pytest-xdist = "^3.6.1"
 black = "^25.1.0"
+pydantic = "^2.11.3"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

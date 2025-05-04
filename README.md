@@ -40,6 +40,15 @@ We're excited to announce the first alpha release of **Python Object Mapper (POM
 - 🛡 Guards against excluded required attributes
 - ❌ Clear error messages for mapping failures
 
+### Pydantic Support
+
+POM provides optional support for mapping objects that use Pydantic's `BaseModel`. If Pydantic is installed in your environment, POM will automatically detect and handle Pydantic models during mapping. This includes:
+
+- Extracting attributes from Pydantic models.
+- Mapping between Pydantic models and other object types.
+
+> **Note:** Pydantic is not a required dependency for POM. You can use POM without installing Pydantic. If Pydantic is not installed, POM will gracefully fall back to handling plain Python objects and dataclasses.
+
 ## 📦 Installation
 
 ```shell
@@ -344,7 +353,7 @@ Parameters:
 - `source`: Source class or tuple of source classes
 - `target`: Target class
 - `mapping`: Dict of property mappings or list of property names
-- `exclusions`: List of properties to exclude from mapping
+- `exclusions`: Set of properties names to exclude from mapping
 
 ##### `map(source, target, skip_init=False, extra=None)`
 
