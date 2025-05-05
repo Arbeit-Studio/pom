@@ -1219,3 +1219,30 @@ class TestPydanticMapping:
         assert result.name == "ynnhoJ"
         assert result.email == source.email
         assert result.age == source.age
+
+    def test_mapping_with_multiple_pydantic_models(self, mapper):
+        """Test mapping between multiple Pydantic models."""
+
+        class SourceModelA(BaseModel):
+            name: str
+            email: str
+
+        class SourceModelB(BaseModel):
+            age: int
+            address: str
+
+        class TargetModel(BaseModel):
+            name: str
+            email: str
+            age: int
+            address: str
+
+        source_a = SourceModelA(name="Johnny", email="johnny@email.com")
+        source_b = SourceModelB(age=30, address="123 Main St")
+        mapper.add_mapping(source=(SourceModelA, SourceModelB), target=TargetModel)
+        result = mapper.map((source_a, source_b), TargetModel)
+        assert isinstance(result, TargetModel)
+        assert result.name == source_a.name
+        assert result.email == source_a.email
+        assert result.age == source_b.age
+        assert result.address == source_b.address
