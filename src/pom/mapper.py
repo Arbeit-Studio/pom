@@ -247,8 +247,16 @@ class Mapper:
         )
 
     def get_adapter(self, obj: Any):
-        if BaseModel is not None and (
-            isinstance(obj, BaseModel) or (isclass(obj) and issubclass(obj, BaseModel))
+        if (
+            BaseModel is not None
+            and (
+                isinstance(obj, BaseModel)
+                or (isclass(obj) and issubclass(obj, BaseModel))
+            )
+            or (
+                isinstance(obj, Iterable)
+                and all(isinstance(item, BaseModel) for item in obj)
+            )
         ):
             return PydanticModelAdapter(self.exclusions, BaseModel)
         return PopoAdapter(self.exclusions)
