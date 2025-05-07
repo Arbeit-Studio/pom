@@ -19,6 +19,9 @@ from typing import (
     Union,
 )
 
+from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
+
 try:
     from pydantic import BaseModel
 except ImportError:
@@ -44,7 +47,7 @@ class PopoAdapter:
         return {
             (name, param)
             for name, param in signature(obj.__init__).parameters.items()
-            if name != "self"
+            if name not in ["self", "args", "kwargs"]
         }
 
     def get_source_attrs_names(self, source: Any) -> Set[str]:
@@ -130,18 +133,22 @@ class PydanticModelAdapter(PopoAdapter):
         # Use BaseModel.dict for field extraction
         if isclass(obj) and issubclass(obj, self.BaseModel):
             # When passed a BaseModel class, return its __fields__ names with None as values.
-            return [(field, None) for field in obj.__fields__.keys()]
+            return [
+                (name, field)
+                for name, field in obj.__fields__.items()
+                if self._field_has_default(field)
+            ]
         elif isinstance(obj, self.BaseModel):
             # For BaseModel instances, use dict() to extract field values.
-            return list(obj.dict(exclude_unset=True).items())
+            return list(obj.dict().items())
         raise TypeError(
             f"Expected a BaseModel instance or class, got {type(obj).__name__}"
         )
 
     def get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
         if isclass(obj):
-            return {(name, None) for name in obj.__fields__.keys()}
-        return {(name, None) for name in type(obj).__fields__.keys()}
+            return {(name, field) for name, field in obj.__fields__.items()}
+        return {(name, field) for name, field in type(obj).__fields__.items()}
 
     def get_source_attrs_names(self, source: Any) -> Set[str]:
         # Aggregate attributes using get_public_attrs and get_init_params
@@ -150,9 +157,13 @@ class PydanticModelAdapter(PopoAdapter):
         return {name for name, _ in pub} | {name for name, _ in init}
 
     def filter_empty_params(
-        self, init_params: Set[Tuple[str, Parameter]]
-    ) -> Set[Tuple[str, Parameter]]:
-        return {(name, param) for name, param in init_params if param is None}
+        self, init_params: Set[Tuple[str, "FieldInfo"]]
+    ) -> Set[Tuple[str, "FieldInfo"]]:
+        return {
+            (name, field)
+            for name, field in init_params
+            if not self._field_has_default(field)
+        }
 
     def is_collection(
         self,
@@ -169,6 +180,13 @@ class PydanticModelAdapter(PopoAdapter):
             return True
         raise TypeError(
             f"Expected a BaseModel instance, class or a collection of them, got {type(obj).__name__}"
+        )
+
+    @staticmethod
+    def _field_has_default(field_info: "FieldInfo") -> bool:
+        return (
+            field_info.default is not PydanticUndefined
+            or field_info.default_factory is not None
         )
 
 
@@ -220,7 +238,7 @@ class Mapper:
         target_is_type = isclass(target)
         target_type: type[TT] = target if target_is_type else type(target)
         skip_init = skip_init or not target_is_type
-        adapter = self.get_adapter(target)
+        adapter = self.get_adapter(source)
         source_type = adapter.get_source_type(source)
 
         self._guard_no_required_attrs_excluded(
