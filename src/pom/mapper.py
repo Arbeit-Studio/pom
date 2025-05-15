@@ -123,6 +123,9 @@ class PopoAdapter:
             setattr(instance, name, value)
         return instance
 
+    def create_instance(self, cls: Type[TT]) -> TT:
+        return object.__new__(cls)
+
 
 class PydanticModelAdapter(PopoAdapter):
     def __init__(self, exclusions: Any, BaseModel: Type) -> None:
@@ -147,8 +150,8 @@ class PydanticModelAdapter(PopoAdapter):
 
     def get_init_params(self, obj: Union[Type, Any]) -> Set[Tuple[str, Any]]:
         if isclass(obj):
-            return {(name, field) for name, field in obj.__fields__.items()}
-        return {(name, field) for name, field in type(obj).__fields__.items()}
+            return self._get_obj_fields(obj)
+        return self._get_obj_fields(type(obj))
 
     def get_source_attrs_names(self, source: Any) -> Set[str]:
         # Aggregate attributes using get_public_attrs and get_init_params
@@ -181,6 +184,15 @@ class PydanticModelAdapter(PopoAdapter):
         raise TypeError(
             f"Expected a BaseModel instance, class or a collection of them, got {type(obj).__name__}"
         )
+
+    def create_instance(self, cls: type[TT]) -> TT:
+        if not isclass(cls) and issubclass(cls, BaseModel):
+            raise TypeError("Expected a Pydantic BaseModel class")
+        return cls.construct()
+
+    @staticmethod
+    def _get_obj_fields(obj):
+        return {(field.alias or name, field) for name, field in obj.__fields__.items()}
 
     @staticmethod
     def _field_has_default(field_info: "FieldInfo") -> bool:
@@ -332,11 +344,13 @@ class Mapper:
                 if not isclass(target):
                     return adapter.set_attrs(target, mapped_attrs)
                 else:
-                    target_instance = object.__new__(target_type)
+                    target_instance = adapter.create_instance(target_type)
                     return adapter.set_attrs(target_instance, mapped_attrs)
             return self._initialize_target(mapped_attrs, target_type)
         except TypeError as e:
             self._handle_mapping_error(source_instance, target_type, e)
+        except AttributeError as e:
+            raise
 
     def _initialize_target(
         self,

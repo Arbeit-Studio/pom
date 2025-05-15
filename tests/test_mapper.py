@@ -1351,7 +1351,6 @@ class TestPydanticMapping:
         # Ensure model is valid after attrs are set
         assert PydanticTarget.model_validate(target_instance.model_dump())
 
-    # In TestPydanticMapping
     def test_pydantic_mapping_with_field_aliases(self, mapper):
         class Source(BaseModel):
             user_name: str
@@ -1361,17 +1360,31 @@ class TestPydanticMapping:
 
         source_instance = Source(user_name="john_doe")
 
-        # Option 1: Mapping by field name (Target.name from Source.user_name if mapped explicitly)
         mapper.add_mapping(
-            source=Source, target=TargetWithAlias, mapping={"user_name": "name"}
+            source=Source,
+            target=TargetWithAlias,
+            mapping={"user_name": "user_name_alias"},
         )
         result1 = mapper.map(source_instance, TargetWithAlias)
         assert result1.name == "john_doe"
         assert result1.model_dump(by_alias=True) == {"user_name_alias": "john_doe"}
 
-        # Option 2: If source also had an alias and you wanted to map alias to alias (more complex)
-        # This would require the mapper to be aware of aliases during attr extraction/setting.
-        # Your current setup maps based on Python attribute names.
+    def test_pydantic_mapping_wrongly_with_field_name_instead_of_aliases(self, mapper):
+        class Source(BaseModel):
+            user_name: str
+
+        class TargetWithAlias(BaseModel):
+            name: str = Field(alias="user_name_alias")
+
+        source_instance = Source(user_name="john_doe")
+
+        mapper.add_mapping(
+            source=Source,
+            target=TargetWithAlias,
+            mapping={"user_name": "name"},
+        )
+        with pytest.raises(ValidationError, match="user_name_alias"):
+            mapper.map(source_instance, TargetWithAlias)
 
 
 class TestPydanticModelAdapter:
