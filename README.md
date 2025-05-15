@@ -336,6 +336,81 @@ mapper.add_mapping(source=Source, target=Target)
 mapper.map(source, target)  # Updates existing target instance
 ```
 
+#### Pydantic Models Mapping
+
+Map between Pydantic models and other object types:
+
+```python
+from pydantic import BaseModel
+
+class UserModel(BaseModel):
+    name: str
+    email: str
+    age: int
+
+class UserDTO:
+    def __init__(self, name: str, email: str, age: int):
+        self.name = name
+        self.email = email
+        self.age = age
+
+mapper = Mapper()
+mapper.add_mapping(source=UserModel, target=UserDTO)
+
+user_model = UserModel(name="John", email="john@example.com", age=30)
+user_dto = mapper.map(user_model, UserDTO)
+```
+
+POM automatically handles Pydantic model attributes during mapping. You can also apply transformations:
+
+```python
+mapper.add_mapping(
+    source=UserModel,
+    target=UserDTO,
+    mapping={"name": lambda n: n.upper()}
+)
+```
+
+##### ⚠️ Mapping Pydantic Models with Aliases
+
+When working with Pydantic's models as targets, pay attention to its aliases. POM does not discover the correct mapping automatically, which may result in attributes being skipped or incorrectly mapped. For example, if a Pydantic model uses aliases like `firstName` for `first_name`, POM will not map these attributes unless explicitly specified. To correctly map the object in this scenario, you should provide the aliases as names in the `mapping` dict to the `add_mapping` method.
+
+Providing the right aliases as mapping:
+
+```python
+from pydantic import BaseModel, Field
+
+class UserDTO:
+    def __init__(self, first_name: str, last_name: str, email_address: str):
+        self.first_name = first_name
+        self.last_name = last_name
+        self.email_address = email_address
+
+class UserModel(BaseModel):
+    first_name: str = Field(alias="firstName")
+    last_name: str = Field(alias="lastName")
+    email_address: str = Field(alias="emailAddress")
+
+
+mapper = Mapper()
+mapper.add_mapping(
+    source=UserDTO,
+    target=UserModel,
+    mapping={
+        "first_name": "firstName",
+        "last_name": "lastName",
+        "email_address": "emailAddress"
+    }
+)
+
+user_model = UserModel(
+    firstName="John",
+    lastName="Doe",
+    emailAddress="john.doe@example.com"
+)
+user_dto = mapper.map(user_model, UserDTO)
+```
+
 ### API Reference
 
 #### Mapper Class
