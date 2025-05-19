@@ -149,6 +149,132 @@ class TestBasicMapping:
         )
         assert target_mapped_extra.extra_field == "set_via_map"
 
+    def test_map_without_add_mapping_map_equal_attrs(self, mapper):
+        """Test that calling map without adding a mapping maps everything that is equal to both source and target."""
+
+        class SourceModel:
+            def __init__(self, name: str, age: int) -> None:
+                self.name = name
+                self.age = age
+
+        class TargetModel:
+            def __init__(self, name: str, job: str = None) -> None:
+                self.name = name
+                self.job = job
+
+        source_instance = SourceModel(name="Test", age=30)
+
+        target = mapper.map(
+            source_instance,
+            TargetModel,
+        )
+        assert isinstance(target, TargetModel)
+        assert target.name == source_instance.name
+
+    def test_map_without_add_mapping_skip_init(self, mapper):
+        """Test mapping without add_mapping and with skip_init=True."""
+
+        class SourceModel:
+            def __init__(self, name: str, age: int) -> None:
+                self.name = name
+                self.age = age
+                self.extra_source_field = "source_only"
+
+        class TargetModel:
+
+            def __init__(
+                self, name: str, age: int, extra_source_field: str, job: str = None
+            ) -> None:
+                self.name = name
+                self.age = age
+                self.extra_source_field = extra_source_field
+                self.job = job
+
+        source_instance = SourceModel(name="Test", age=30)
+        # Create an empty TargetModel instance, __new__ is used by mapper
+        target_instance_shell = object.__new__(TargetModel)
+        target = mapper.map(source_instance, target_instance_shell, skip_init=True)
+
+        assert isinstance(target, TargetModel)
+        assert target.name == source_instance.name
+        assert target.age == source_instance.age  # Copied because skip_init=True
+        assert not hasattr(target, "job")  # Not in source, not set because of skip_init
+        assert target.extra_source_field == "source_only"
+
+    def test_map_without_add_mapping_multiple_sources(self, mapper):
+        """Test mapping from multiple sources without add_mapping."""
+
+        class SourceModelA:
+            def __init__(self, name: str, age: int) -> None:
+                self.name = name
+                self.age = age
+
+        class SourceModelB:
+            def __init__(self, job: str, city: str) -> None:
+                self.job = job
+                self.city = city
+
+        class TargetModel:
+            def __init__(
+                self,
+                name: str,
+                job: str = "default_job",
+                city: str = "default_city",
+                age: int = 0,
+            ) -> None:
+                self.name = name
+                self.job = job
+                self.city = city
+                self.age = age  # Default value
+
+        source_a = SourceModelA(name="Test", age=30)
+        source_b = SourceModelB(job="Engineer", city="SF")
+
+        target = mapper.map((source_a, source_b), TargetModel)
+
+        assert isinstance(target, TargetModel)
+        assert target.name == source_a.name
+        assert target.job == source_b.job
+        assert target.city == source_b.city  # Takes from SourceModelB
+        assert target.age == source_a.age  # Takes from SourceModelA
+
+    def test_map_without_add_mapping_multiple_sources_skip_init(self, mapper):
+        """Test mapping from multiple sources without add_mapping and with skip_init=True."""
+
+        class SourceModelA:
+            def __init__(self, name: str, age: int) -> None:
+                self.name = name
+                self.age = age
+                self.a_specific = "from_a"
+
+        class SourceModelB:
+            def __init__(self, job: str, city: str) -> None:
+                self.job = job
+                self.city = city
+                self.b_specific = "from_b"
+
+        class TargetModel:
+            name: str
+            age: int
+            job: str
+            city: str
+            a_specific: str
+            b_specific: str
+            # No __init__ for this test to ensure attributes are set directly
+
+        source_a = SourceModelA(name="Test", age=30)
+        source_b = SourceModelB(job="Engineer", city="SF")
+        target_instance_shell = object.__new__(TargetModel)
+        target = mapper.map((source_a, source_b), target_instance_shell, skip_init=True)
+
+        assert isinstance(target, TargetModel)
+        assert target.name == source_a.name
+        assert target.job == source_b.job
+        assert target.age == source_a.age
+        assert target.city == source_b.city
+        assert target.a_specific == "from_a"
+        assert target.b_specific == "from_b"
+
 
 class TestPropertyExclusion:
     """Tests for property exclusion functionality."""
@@ -1541,6 +1667,122 @@ class TestPydanticMapping:
         )
         with pytest.raises(ValidationError, match="user_name_alias"):
             mapper.map(source_instance, TargetWithAlias)
+
+    def test_map_pydantic_without_add_mapping(self, mapper):
+        """Test mapping Pydantic models without add_mapping."""
+
+        class SourcePydantic(BaseModel):
+            name: str
+            age: int
+            extra_source_field: str = "source_only_pydantic"
+
+        class TargetPydantic(BaseModel):
+            name: str
+            job: Optional[str] = None
+            age: int
+
+        source_instance = SourcePydantic(name="TestPydantic", age=31)
+        target = mapper.map(source_instance, TargetPydantic)
+
+        assert isinstance(target, TargetPydantic)
+        assert target.name == source_instance.name
+        assert target.age == source_instance.age
+        assert target.job is None
+        assert not hasattr(target, "extra_source_field")
+
+    def test_map_pydantic_without_add_mapping_skip_init(self, mapper):
+        """Test mapping Pydantic models without add_mapping and skip_init=True."""
+
+        class SourcePydantic(BaseModel):
+            name: str
+            age: int
+            extra_source_field: str = "source_only_pydantic"
+
+        class TargetPydantic(BaseModel):
+            name: str
+            job: Optional[str] = None
+            age: Optional[int] = None
+            extra_source_field: Optional[str] = None
+
+        source_instance = SourcePydantic(name="TestPydantic", age=32)
+        # For Pydantic, skip_init=True implies using .construct() or similar,
+        # then setting attributes.
+        # The mapper's PydanticModelAdapter uses cls.construct() then set_attrs.
+        target = mapper.map(source_instance, TargetPydantic, skip_init=True)
+
+        assert isinstance(target, TargetPydantic)
+        assert target.name == source_instance.name
+        assert target.age == source_instance.age
+        assert (
+            target.job is None
+        )  # Not in source, Pydantic default if not set by construct
+        assert target.extra_source_field == "source_only_pydantic"
+
+    def test_map_multiple_pydantic_sources_without_add_mapping(self, mapper):
+        """Test mapping from multiple Pydantic sources without add_mapping."""
+
+        class SourcePydanticA(BaseModel):
+            name: str
+            age: int
+            a_specific: str = "from_a_pydantic"
+
+        class SourcePydanticB(BaseModel):
+            job: str
+            city: str
+            b_specific: str = "from_b_pydantic"
+
+        class TargetPydantic(BaseModel):
+            name: str
+            job: str
+            age: int
+            city: Optional[str] = "default_city_pydantic"
+
+        source_a = SourcePydanticA(name="TestPydanticMulti", age=33)
+        source_b = SourcePydanticB(job="Developer", city="NY")
+
+        target = mapper.map((source_a, source_b), TargetPydantic)
+
+        assert isinstance(target, TargetPydantic)
+        assert target.name == source_a.name
+        assert target.age == source_a.age
+        assert target.job == source_b.job
+        assert target.city == source_b.city
+        assert not hasattr(target, "a_specific")
+        assert not hasattr(target, "b_specific")
+
+    def test_map_multiple_pydantic_sources_without_add_mapping_skip_init(self, mapper):
+        """Test mapping from multiple Pydantic sources without add_mapping and skip_init=True."""
+
+        class SourcePydanticA(BaseModel):
+            name: str
+            age: int
+            a_specific: str = "from_a_pydantic_skip"
+
+        class SourcePydanticB(BaseModel):
+            job: str
+            city: str
+            b_specific: str = "from_b_pydantic_skip"
+
+        class TargetPydantic(BaseModel):
+            name: str
+            age: Optional[int] = None
+            job: Optional[str] = None
+            city: Optional[str] = None
+            a_specific: Optional[str] = None
+            b_specific: Optional[str] = None
+
+        source_a = SourcePydanticA(name="TestPydanticMultiSkip", age=34)
+        source_b = SourcePydanticB(job="Architect", city="LA")
+
+        target = mapper.map((source_a, source_b), TargetPydantic, skip_init=True)
+
+        assert isinstance(target, TargetPydantic)
+        assert target.name == source_a.name
+        assert target.age == source_a.age
+        assert target.job == source_b.job
+        assert target.city == source_b.city
+        assert target.a_specific == source_a.a_specific
+        assert target.b_specific == source_b.b_specific
 
 
 class TestPydanticModelAdapter:
