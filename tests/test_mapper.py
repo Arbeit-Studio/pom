@@ -1,3 +1,4 @@
+import unittest.mock
 from contextlib import nullcontext as does_not_raise
 from dataclasses import dataclass
 from typing import List, Optional
@@ -95,6 +96,58 @@ class TestBasicMapping:
 
         expected_name = reversed_string(source.name) if transform_name else source.name
         assert result.name == expected_name
+
+    def test_map_popo_to_popo_skip_init(self, mapper):
+        """Test mapping to a POPO target with skip_init=True."""
+
+        class Source:
+            def __init__(self, value: str):
+                self.value = value
+
+        class Target:
+            def __init__(self, value: str = "default"):
+                self.value = value
+                self.initialized = True  # Mark if __init__ was called
+
+            extra_field: str = "not_set"
+
+        source_instance = Source(value="test_value")
+        mapper.add_mapping(source=Source, target=Target)
+
+        # Create target instance without calling __init__
+        target_instance = mapper.map(source_instance, Target, skip_init=True)
+
+        assert isinstance(target_instance, Target)
+        assert target_instance.value == "test_value"
+        assert not hasattr(
+            target_instance, "initialized"
+        )  # __init__ should not have been called
+
+        # Verify it can set attributes not in __init__ if they exist on the class
+        # For this to work, Target needs to be prepared to have attributes set directly
+        # or the adapter's set_attrs needs to handle it.
+        # Let's assume direct attribute setting for now.
+        target_instance_with_extra = Target()  # Create a normal instance to compare
+        target_instance_with_extra.extra_field = "set_via_map"
+
+        mapper_extra = Mapper()
+
+        class SourceWithExtra:
+            def __init__(self, extra_field: str):
+                self.extra_field = extra_field
+
+        source_extra_instance = SourceWithExtra(extra_field="set_via_map")
+        mapper_extra.add_mapping(source=SourceWithExtra, target=Target)
+
+        # Target class needs 'extra_field' defined if we expect it to be set
+        # For simplicity, let's assume Target has it.
+        # If Target doesn't have `extra_field` defined, this would typically set it dynamically.
+        Target.extra_field = None  # Ensure the attribute exists for setattr
+
+        target_mapped_extra = mapper_extra.map(
+            source_extra_instance, Target, skip_init=True
+        )
+        assert target_mapped_extra.extra_field == "set_via_map"
 
 
 class TestPropertyExclusion:
@@ -242,6 +295,86 @@ class TestErrorHandling:
         else:
             result = mapper.map(source, Target, skip_init=skip_init)
             assert result.email == source.email
+
+    def test_add_mapping_source_attr_validation(self, mapper):
+        """Test add_mapping raises TypeError if a mapped source attribute does not exist."""
+
+        class SourceWithoutAttr:
+            pass
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        with pytest.raises(
+            TypeError,
+            match="Mapping attribute non_existent_attr not found in source SourceWithoutAttr.",
+        ):
+            mapper.add_mapping(
+                source=SourceWithoutAttr,
+                target=Target,
+                mapping={"non_existent_attr": "name"},
+            )
+
+    def test_map_from_empty_iterable_source(self, mapper):
+        """Test mapping from an empty iterable source."""
+
+        class TargetWithNoArgInit:
+            def __init__(self):
+                self.value = "default"
+
+        class TargetWithRequiredArg:
+            def __init__(self, name: str):
+                self.name = name
+
+        mapper.add_mapping(
+            source=list, target=TargetWithNoArgInit
+        )  # Dummy source type for mapping rule
+
+        # Case 1: Target can be initialized without arguments
+        with does_not_raise():
+            result1 = mapper.map([], TargetWithNoArgInit)
+            assert isinstance(result1, TargetWithNoArgInit)
+            assert result1.value == "default"
+
+        # Case 2: Target requires arguments for __init__
+        mapper.add_mapping(source=list, target=TargetWithRequiredArg)
+        with pytest.raises(
+            TypeError,
+            match=r"__init__\(\) missing 1 required positional argument: 'name'",
+        ):
+            mapper.map([], TargetWithRequiredArg)
+
+        # Case 3: skip_init = True
+        with does_not_raise():
+            result3 = mapper.map([], TargetWithRequiredArg, skip_init=True)
+            assert isinstance(result3, TargetWithRequiredArg)
+            # Attributes would not be set as there's no source data
+            assert not hasattr(
+                result3, "name"
+            )  # Or it might be None if class defines it
+
+    def test_map_unsupported_transform_type(self, mapper):
+        """Test that _map raises ValueError for an unsupported transform type."""
+
+        class Source:
+            def __init__(self, data: str):
+                self.data = data
+
+        class Target:
+            def __init__(self, data: str):
+                self.data = data
+
+        source_instance = Source("test")
+        mapper.add_mapping(
+            source=Source,
+            target=Target,
+            mapping={"data": 123},  # Invalid transform type (integer)
+        )
+        with pytest.raises(
+            ValueError, match="Unsupported transform type for property 'data'"
+        ):
+            mapper.map(source_instance, Target)
 
 
 class TestAdvancedMapping:
@@ -1190,6 +1323,29 @@ class TestAdvancedMapping:
 
         assert result.age == expected_age(source_b, source_a)
 
+    def test_mapping_with_target_name_and_transform_tuple(
+        self, mapper, reversed_string
+    ):
+        """Test mapping using (target_name, transform_function) tuple."""
+
+        class Source:
+            def __init__(self, original_name: str):
+                self.original_name = original_name
+
+        class Target:
+            def __init__(self, new_name: str):
+                self.new_name = new_name
+
+        source_instance = Source("TestName")
+        mapper.add_mapping(
+            source=Source,
+            target=Target,
+            mapping={"original_name": ("new_name", reversed_string)},
+        )
+        result = mapper.map(source_instance, Target)
+        assert isinstance(result, Target)
+        assert result.new_name == "emaNtseT"
+
 
 class TestPydanticMapping:
 
@@ -1454,6 +1610,47 @@ class TestPydanticModelAdapter:
         assert instance_params_dict["value"].annotation == int
         assert instance_params_dict["value"].is_required()
 
+    def test_pydantic_adapter_get_public_attrs_from_class_with_defaults(self, mapper):
+        class MyPydanticModelWithDefaults(BaseModel):
+            name: str
+            age: int = 30
+            city: Optional[str] = Field(default="NY")
+            country: str  # No default
+
+        adapter = mapper.get_adapter(MyPydanticModelWithDefaults)
+        attrs_gen = adapter.get_public_attrs(MyPydanticModelWithDefaults)
+        attrs = dict(attrs_gen)
+
+        assert isinstance(adapter, PydanticModelAdapter)
+
+        # Fields with defaults should be included
+        assert "age" in attrs
+        assert isinstance(attrs["age"], FieldInfo)
+        assert attrs["age"].default == 30
+
+        assert "city" in attrs
+        assert isinstance(attrs["city"], FieldInfo)
+        assert attrs["city"].default == "NY"
+
+        # Fields without defaults should NOT be included by get_public_attrs for a class
+        # because it checks _field_has_default or if it's an alias for a field with default.
+        # The current PydanticModelAdapter.get_public_attrs for a class only returns fields with defaults.
+        # If the intention is to get all fields, the adapter logic would need to change.
+        # Based on current adapter logic:
+        assert "name" not in attrs  # No default
+        assert "country" not in attrs  # No default
+
+    def test_pydantic_adapter_get_public_attrs_from_class_no_defaults(self, mapper):
+        # This is essentially what the original test_pydantic_adapter_get_public_attrs_from_class did
+        class MyPydanticModelNoDefaults(BaseModel):
+            name: str
+            age: int
+
+        adapter = mapper.get_adapter(MyPydanticModelNoDefaults)
+        attrs = adapter.get_public_attrs(MyPydanticModelNoDefaults)
+        assert isinstance(adapter, PydanticModelAdapter)
+        assert set(attrs) == set()  # No fields with defaults
+
 
 class TestPopoAdapter:
     def test_popo_adapter_get_init_params_variations(self, mapper):
@@ -1500,3 +1697,44 @@ class TestPopoAdapter:
         assert attrs["name"] == "test"
         assert "get_value" in attrs  # Methods are included
         assert "_internal_val" not in attrs
+
+
+class TestAdapterSelection:
+    def test_get_adapter_for_mixed_iterable(self, mapper):
+        class PydanticModel(BaseModel):
+            field: str
+
+        class PopoModel:
+            pass
+
+        mixed_iterable = [PydanticModel(field="test"), PopoModel()]
+        adapter = mapper.get_adapter(mixed_iterable)
+        # Expect PopoAdapter because not all items are Pydantic models
+        assert not isinstance(adapter, PydanticModelAdapter)
+        assert isinstance(
+            adapter, mapper.get_adapter(PopoModel()).__class__
+        )  # Check it's PopoAdapter
+
+    @unittest.mock.patch("pom.mapper.BaseModel", None)
+    def test_get_adapter_when_pydantic_not_available(self, mapper):
+        class SomeClass:
+            pass
+
+        # Test with a class
+        adapter_class = mapper.get_adapter(SomeClass)
+        assert not isinstance(adapter_class, PydanticModelAdapter)
+        assert isinstance(
+            adapter_class, mapper.get_adapter(SomeClass()).__class__
+        )  # Check it's PopoAdapter
+
+        # Test with an instance
+        instance = SomeClass()
+        adapter_instance = mapper.get_adapter(instance)
+        assert not isinstance(adapter_instance, PydanticModelAdapter)
+        assert isinstance(adapter_instance, mapper.get_adapter(SomeClass()).__class__)
+
+        # Test with an iterable of non-Pydantic (since BaseModel is None)
+        iterable = [SomeClass(), SomeClass()]
+        adapter_iterable = mapper.get_adapter(iterable)
+        assert not isinstance(adapter_iterable, PydanticModelAdapter)
+        assert isinstance(adapter_iterable, mapper.get_adapter(SomeClass()).__class__)

@@ -277,9 +277,8 @@ class Mapper:
         )
 
     def get_adapter(self, obj: Any):
-        if (
-            BaseModel is not None
-            and (
+        if BaseModel is not None and (
+            (
                 isinstance(obj, BaseModel)
                 or (isclass(obj) and issubclass(obj, BaseModel))
             )
