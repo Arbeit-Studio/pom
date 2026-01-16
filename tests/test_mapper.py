@@ -1893,6 +1893,168 @@ class TestPydanticModelAdapter:
         assert isinstance(adapter, PydanticModelAdapter)
         assert set(attrs) == set()  # No fields with defaults
 
+    def test_pydantic_adapter_object_without_source_fields_allowing_model_extra_and_flag_map_missing_fields_true(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        target = TargetPydanticModel(name="Name1", age=34)
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+
+        result = mapper.map(source, target, map_missing_fields=True)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert hasattr(result, "extra_field")
+
+    def test_pydantic_adapter_object_without_source_fields_not_allowing_model_extra_and_flag_map_missing_fields_true(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        target = TargetPydanticModel(name="Name1", age=34)
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+
+        with pytest.raises(
+            ValueError, match="Cannot map missing fields on target model"
+        ):
+            mapper.map(source, target, map_missing_fields=True)
+
+    def test_pydantic_adapter_object_without_source_fields_allowing_model_extra_and_flag_map_missing_fields_false(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        target = TargetPydanticModel(name="Name1", age=34)
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+
+        result = mapper.map(source, target)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert not hasattr(result, "extra_field")
+
+    def test_pydantic_adapter_object_without_source_fields_not_allowing_model_extra_and_flag_map_missing_fields_false(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        target = TargetPydanticModel(name="Name1", age=34)
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+
+        result = mapper.map(source, target)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert not hasattr(result, "extra_field")
+
+    def test_pydantic_adapter_class_without_source_fields_allowing_model_extra_and_flag_map_missing_fields_true(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+
+        result = mapper.map(source, TargetPydanticModel, map_missing_fields=True)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert not hasattr(result, "extra_field")
+
+    def test_pydantic_adapter_class_without_source_fields_not_allowing_model_extra_and_flag_map_missing_fields_true(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+        with pytest.raises(ValueError):
+            mapper.map(source, TargetPydanticModel, map_missing_fields=True)
+
+    def test_pydantic_adapter_class_without_source_fields_allowing_model_extra_and_flag_map_missing_fields_false(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+        result = mapper.map(source, TargetPydanticModel)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert hasattr(result, "extra_field")
+
+    def test_pydantic_adapter_class_without_source_fields_not_allowing_model_extra_and_flag_map_missing_fields_false(
+        self, mapper
+    ):
+        class TargetPydanticModel(BaseModel):
+            name: str
+            age: int
+
+        class SourcePydanticModel(BaseModel):
+            name: str
+            age: int
+            extra_field: str
+
+        source = SourcePydanticModel(name="Name2", age=25, extra_field="extra")
+        result = mapper.map(source, TargetPydanticModel)
+
+        assert hasattr(result, "name")
+        assert hasattr(result, "age")
+        assert not hasattr(result, "extra_field")
+
 
 class TestPopoAdapter:
     def test_popo_adapter_get_init_params_variations(self, mapper):
@@ -1980,3 +2142,352 @@ class TestAdapterSelection:
         adapter_iterable = mapper.get_adapter(iterable)
         assert not isinstance(adapter_iterable, PydanticModelAdapter)
         assert isinstance(adapter_iterable, mapper.get_adapter(SomeClass()).__class__)
+
+
+class TestMapMissingFieldsEdgeCases:
+    """Tests for edge cases with map_missing_fields flag."""
+
+    def test_popo_map_missing_fields_without_skip_init_raises_error(self, mapper):
+        """
+        CRITICAL BUG: Verify that map_missing_fields=True fails without skip_init for POPOs.
+
+        This test evidences that users will get confusing TypeError when trying to use
+        map_missing_fields=True without skip_init=True on regular Python classes.
+        """
+
+        class Source:
+            def __init__(self, name: str, extra: str):
+                self.name = name
+                self.extra = extra
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Test", "extra_value")
+
+        # This should fail with TypeError about unexpected keyword argument
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            mapper.map(source, Target, map_missing_fields=True)
+
+    def test_popo_map_missing_fields_with_skip_init_succeeds(self, mapper):
+        """
+        Verify that map_missing_fields=True WORKS with skip_init=True for POPOs.
+        This is the CORRECT way to use map_missing_fields with POPOs.
+        """
+
+        class Source:
+            def __init__(self, name: str, extra: str):
+                self.name = name
+                self.extra = extra
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Test", "extra_value")
+
+        # This should succeed
+        result = mapper.map(source, Target, skip_init=True, map_missing_fields=True)
+
+        assert result.name == "Test"
+        assert result.extra == "extra_value"
+
+    def test_extra_parameter_overrides_map_missing_fields(self, mapper):
+        """
+        IMPORTANT: Verify that extra parameter takes precedence over map_missing_fields.
+        This behavior is NOT documented and can confuse users.
+        """
+
+        class Source:
+            def __init__(self, name: str, field: str):
+                self.name = name
+                self.field = "from_source"
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Test", "from_source")
+
+        result = mapper.map(
+            source,
+            Target,
+            skip_init=True,
+            map_missing_fields=True,
+            extra={"field": "from_extra"},
+        )
+
+        # extra parameter should override the source value
+        assert result.field == "from_extra"  # NOT "from_source"
+        assert result.name == "Test"
+
+    def test_pydantic_class_vs_instance_target_behavior_difference(self, mapper):
+        """
+        CRITICAL INCONSISTENCY: Pydantic behaves differently when target is class vs instance.
+
+        - Target as CLASS + map_missing_fields=False: extra fields ARE mapped (Pydantic default)
+        - Target as INSTANCE + map_missing_fields=False: extra fields are NOT mapped
+        - Target as CLASS + map_missing_fields=True: extra fields are NOT mapped
+        - Target as INSTANCE + map_missing_fields=True: extra fields ARE mapped
+
+        This inconsistency is confusing and NOT documented.
+        """
+
+        class SourceModel(BaseModel):
+            name: str
+            extra_field: str
+
+        class TargetModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+
+        source = SourceModel(name="Test", extra_field="extra")
+
+        # Case 1: Target as CLASS with map_missing_fields=False
+        # Expected: extra_field IS mapped (Pydantic's default behavior during __init__)
+        result_class_false = mapper.map(source, TargetModel, map_missing_fields=False)
+        assert hasattr(result_class_false, "extra_field")
+        assert result_class_false.extra_field == "extra"
+        print("✓ Class + map_missing_fields=False: extra field MAPPED")
+
+        # Case 2: Target as INSTANCE with map_missing_fields=False
+        # Expected: extra_field is NOT mapped
+        target_instance = TargetModel(name="Original")
+        result_instance_false = mapper.map(
+            source, target_instance, map_missing_fields=False
+        )
+        assert not hasattr(result_instance_false, "extra_field")
+        print("✓ Instance + map_missing_fields=False: extra field NOT mapped")
+
+        # Case 3: Target as CLASS with map_missing_fields=True
+        # Expected: extra_field is NOT mapped (because of validation during __init__)
+        result_class_true = mapper.map(source, TargetModel, map_missing_fields=True)
+        assert not hasattr(result_class_true, "extra_field")
+        print("✓ Class + map_missing_fields=True: extra field NOT mapped")
+
+        # Case 4: Target as INSTANCE with map_missing_fields=True
+        # Expected: extra_field IS mapped
+        target_instance2 = TargetModel(name="Original")
+        result_instance_true = mapper.map(
+            source, target_instance2, map_missing_fields=True
+        )
+        assert hasattr(result_instance_true, "extra_field")
+        assert result_instance_true.extra_field == "extra"
+        print("✓ Instance + map_missing_fields=True: extra field MAPPED")
+
+    def test_multiple_sources_with_map_missing_fields(self, mapper):
+        """Test map_missing_fields with multiple sources."""
+
+        class SourceA:
+            def __init__(self, name: str, a_extra: str):
+                self.name = name
+                self.a_extra = "from_a"
+
+        class SourceB:
+            def __init__(self, age: int, b_extra: str):
+                self.age = age
+                self.b_extra = "from_b"
+
+        class Target:
+            def __init__(self, name: str, age: int):
+                self.name = name
+                self.age = age
+
+        source_a = SourceA("Test", "from_a")
+        source_b = SourceB(30, "from_b")
+
+        # With map_missing_fields=True - both extra fields should be mapped
+        result = mapper.map(
+            (source_a, source_b), Target, skip_init=True, map_missing_fields=True
+        )
+
+        assert result.name == "Test"
+        assert result.age == 30
+        assert result.a_extra == "from_a"
+        assert result.b_extra == "from_b"
+
+        # Without map_missing_fields - extra fields should NOT be mapped
+        result_no_extra = mapper.map((source_a, source_b), Target, skip_init=True)
+
+        assert not hasattr(result_no_extra, "a_extra")
+        assert not hasattr(result_no_extra, "b_extra")
+
+    def test_map_missing_fields_with_exclusions_interaction(self, mapper):
+        """
+        IMPORTANT: Test interaction between map_missing_fields and exclusions.
+        This behavior is NOT clearly documented.
+        """
+
+        class Source:
+            def __init__(self, name: str, email: str, extra: str):
+                self.name = name
+                self.email = email
+                self.extra = "extra_value"
+
+        class Target:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        source = Source("Test", "test@email.com", "extra")
+
+        mapper.add_mapping(source=Source, target=Target, exclusions={"email"})
+
+        # extra field should be mapped, email should be excluded
+        result = mapper.map(source, Target, skip_init=True, map_missing_fields=True)
+
+        assert result.name == "Test"
+        assert not hasattr(result, "email") or result.email is None
+        assert result.extra == "extra_value"
+
+    def test_pydantic_skip_init_with_map_missing_fields_bypasses_validation(
+        self, mapper
+    ):
+        """
+        IMPORTANT: Test that Pydantic validation is bypassed with skip_init.
+        This is NOT documented and can lead to invalid data.
+        """
+
+        class SourceModel(BaseModel):
+            name: str
+            age: int = -5  # Invalid age
+            extra: str = "extra"
+
+        class TargetModel(BaseModel):
+            model_config = {"extra": "allow"}
+            name: str
+            age: int
+
+            @field_validator("age")
+            def age_must_be_positive(cls, v):
+                if v < 0:
+                    raise ValueError("age must be positive")
+                return v
+
+        source = SourceModel(name="Test", age=-5)
+
+        # Should NOT raise during mapping with skip_init (construct bypasses validation)
+        with does_not_raise():
+            result = mapper.map(
+                source, TargetModel, skip_init=True, map_missing_fields=True
+            )
+            assert result.age == -5  # Invalid value is set
+            assert result.extra == "extra"
+
+        # But SHOULD raise when trying to validate the result
+        with pytest.raises(ValidationError):
+            TargetModel.model_validate(result.model_dump())
+
+    def test_map_missing_fields_false_is_default_behavior(self, mapper):
+        """
+        Verify that map_missing_fields=False is the DEFAULT behavior.
+        This is the breaking change from version 0.1.5-alpha.
+        """
+
+        class Source:
+            def __init__(self, name: str, extra: str):
+                self.name = name
+                self.extra = "extra_value"
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Test", "extra_value")
+
+        # Default behavior (map_missing_fields not specified)
+        result_default = mapper.map(source, Target, skip_init=True)
+
+        # Explicit map_missing_fields=False
+        result_explicit_false = mapper.map(
+            source, Target, skip_init=True, map_missing_fields=False
+        )
+
+        # Both should behave the same - NOT mapping extra fields
+        assert result_default.name == "Test"
+        assert not hasattr(result_default, "extra")
+
+        assert result_explicit_false.name == "Test"
+        assert not hasattr(result_explicit_false, "extra")
+
+    def test_pydantic_without_extra_allow_and_map_missing_fields_true_raises_error(
+        self, mapper
+    ):
+        """
+        Verify that using map_missing_fields=True with Pydantic models
+        that DON'T have extra="allow" raises a clear error.
+        """
+
+        class SourceModel(BaseModel):
+            name: str
+            extra_field: str
+
+        class StrictTargetModel(BaseModel):
+            # No model_config with extra="allow"
+            name: str
+
+        source = SourceModel(name="Test", extra_field="extra")
+
+        # Should raise ValueError with clear message
+        with pytest.raises(
+            ValueError, match="Cannot map missing fields on target model"
+        ):
+            mapper.map(
+                source, StrictTargetModel, skip_init=True, map_missing_fields=True
+            )
+
+    def test_map_missing_fields_preserves_source_precedence_in_multiple_sources(
+        self, mapper
+    ):
+        """
+        Test that map_missing_fields respects source precedence when multiple sources
+        have the same extra field.
+        """
+
+        class SourceA:
+            def __init__(self, name: str):
+                self.name = name
+                self.shared_extra = "from_a"
+
+        class SourceB:
+            def __init__(self, age: int):
+                self.age = age
+                self.shared_extra = "from_b"
+
+        class Target:
+            def __init__(self, name: str, age: int):
+                self.name = name
+                self.age = age
+
+        source_a = SourceA("Test")
+        source_b = SourceB(30)
+
+        # SourceA comes first, so its shared_extra should win
+        result = mapper.map(
+            (source_a, source_b), Target, skip_init=True, map_missing_fields=True
+        )
+
+        assert result.shared_extra == "from_a"  # From first source
+
+    def test_map_missing_fields_with_none_values(self, mapper):
+        """
+        Test that map_missing_fields correctly handles None values in extra fields.
+        """
+
+        class Source:
+            def __init__(self, name: str, extra: Optional[str]):
+                self.name = name
+                self.extra = extra
+
+        class Target:
+            def __init__(self, name: str):
+                self.name = name
+
+        source = Source("Test", None)
+
+        result = mapper.map(source, Target, skip_init=True, map_missing_fields=True)
+
+        assert result.name == "Test"
+        assert hasattr(result, "extra")
+        assert result.extra is None

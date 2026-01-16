@@ -118,7 +118,9 @@ class PopoAdapter:
             if param.default is Parameter.empty
         }
 
-    def set_attrs(self, instance: TT, attrs: Mapping[str, Any]) -> TT:
+    def set_attrs(
+        self, instance: TT, attrs: Mapping[str, Any], map_missing_fields: bool
+    ) -> TT:
         for name, value in attrs.items():
             setattr(instance, name, value)
         return instance
@@ -126,9 +128,28 @@ class PopoAdapter:
     def create_instance(self, cls: Type[TT]) -> TT:
         return object.__new__(cls)
 
+    def _initialize_target(
+        self,
+        mapped_attrs: Mapping[str, Any],
+        target_type: Type[TT],
+        map_missing_fields: bool = False,
+    ) -> TT:
+
+        return target_type(
+            **{
+                k: v
+                for k, v in mapped_attrs.items()
+                if k in set(self.get_attrs_names(self.get_init_params(target_type)))
+            },
+        )
+
 
 class PydanticModelAdapter(PopoAdapter):
-    def __init__(self, exclusions: Any, BaseModel: Type) -> None:
+    def __init__(
+        self,
+        exclusions: Any,
+        BaseModel: Type,
+    ) -> None:
         super().__init__(exclusions)
         self.BaseModel = BaseModel
 
@@ -190,6 +211,43 @@ class PydanticModelAdapter(PopoAdapter):
             raise TypeError("Expected a Pydantic BaseModel class")
         return cls.construct()
 
+    def set_attrs(
+        self, instance: TT, attrs: Mapping[str, Any], map_missing_fields: bool
+    ) -> TT:
+        model_allow_extra = instance.model_config.get("extra") == "allow"
+        if map_missing_fields and not model_allow_extra:
+            raise ValueError(
+                f"Cannot map missing fields on target model '{type(instance).__name__}' because it does not allow extra fields."
+            )
+
+        for name, value in attrs.items():
+            if map_missing_fields and model_allow_extra:
+                setattr(instance, name, value)
+                continue
+
+            target_fields = instance.model_fields
+            if map_missing_fields is False:
+                if name not in target_fields:
+                    continue
+
+            setattr(instance, name, value)
+
+        return instance
+
+    def _initialize_target(
+        self,
+        mapped_attrs: Mapping[str, Any],
+        target_type: Type[TT],
+        map_missing_fields: bool = False,
+    ) -> TT:
+        if map_missing_fields and not target_type.model_config.get("extra") == "allow":
+            raise ValueError(
+                f"Cannot initialize target model '{target_type.__name__}' with missing fields because it does not allow extra fields during initialization. (without model_config.extra='allow')"
+            )
+        return target_type(
+            **{k: v for k, v in mapped_attrs.items()},
+        )
+
     @staticmethod
     def _get_obj_fields(obj):
         return {(field.alias or name, field) for name, field in obj.__fields__.items()}
@@ -237,6 +295,7 @@ class Mapper:
         target: Union[TT, type[TT]],
         skip_init: bool = False,
         extra: Optional[dict] = None,
+        map_missing_fields: bool = False,
     ) -> TT:
         """Map source object(s) to target type.
 
@@ -274,6 +333,7 @@ class Mapper:
             mapped_attrs,
             target_type,
             source,
+            map_missing_fields,
         )
 
     def get_adapter(self, obj: Any):
@@ -335,36 +395,27 @@ class Mapper:
         mapped_attrs: Mapping[str, Any],
         target_type: Type[TT],
         source_instance: Union[TS, Tuple[TS, ...]],
+        map_missing_fields: bool = False,
     ) -> TT:
         # Create target instance
         adapter = self.get_adapter(target)
         try:
             if skip_init:
                 if not isclass(target):
-                    return adapter.set_attrs(target, mapped_attrs)
+                    return adapter.set_attrs(target, mapped_attrs, map_missing_fields)
                 else:
                     target_instance = adapter.create_instance(target_type)
-                    return adapter.set_attrs(target_instance, mapped_attrs)
-            return self._initialize_target(mapped_attrs, target_type)
+                    return adapter.set_attrs(
+                        target_instance, mapped_attrs, map_missing_fields
+                    )
+
+            return adapter._initialize_target(
+                mapped_attrs, target_type, map_missing_fields=True
+            )
         except TypeError as e:
             self._handle_mapping_error(source_instance, target_type, e)
         except AttributeError as e:
             raise
-
-    def _initialize_target(
-        self,
-        mapped_attrs: Mapping[str, Any],
-        target_type: Type[TT],
-    ) -> TT:
-        adapter = self.get_adapter(target_type)
-        return target_type(
-            **{
-                k: v
-                for k, v in mapped_attrs.items()
-                if k
-                in set(adapter.get_attrs_names(adapter.get_init_params(target_type)))
-            },
-        )
 
     def _guard_no_required_attrs_excluded(
         self,
