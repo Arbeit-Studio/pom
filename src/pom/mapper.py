@@ -119,11 +119,42 @@ class PopoAdapter:
         }
 
     def set_attrs(
-        self, instance: TT, attrs: Mapping[str, Any], map_missing_fields: bool
+        self,
+        instance: TT,
+        attrs: Mapping[str, Any],
+        map_missing_fields: bool,
+        skip_init: Optional[bool] = False,
     ) -> TT:
-        for name, value in attrs.items():
-            setattr(instance, name, value)
-        return instance
+        if skip_init and map_missing_fields:
+            for name, value in attrs.items():
+                setattr(instance, name, value)
+            return instance
+
+        if not skip_init and not map_missing_fields:
+            return instance
+
+        if skip_init and not map_missing_fields:
+            public_attrs = self.get_public_attrs(instance)
+            for name, value in attrs.items():
+                if name in public_attrs:
+                    setattr(instance, name, value)
+                continue
+
+            return instance
+
+        if skip_init:
+            for name, value in attrs.items():
+                setattr(instance, name, value)
+
+            return instance
+
+        init_param_names = set(self.get_attrs_names(self.get_init_params(instance)))
+        if map_missing_fields:
+            for name, value in attrs.items():
+                if name in init_param_names:
+                    continue
+                setattr(instance, name, value)
+            return instance
 
     def create_instance(self, cls: Type[TT]) -> TT:
         return object.__new__(cls)
@@ -133,15 +164,18 @@ class PopoAdapter:
         mapped_attrs: Mapping[str, Any],
         target_type: Type[TT],
         map_missing_fields: bool = False,
+        skip_init: Optional[bool] = False,
     ) -> TT:
 
-        return target_type(
+        instance = target_type(
             **{
                 k: v
                 for k, v in mapped_attrs.items()
                 if k in set(self.get_attrs_names(self.get_init_params(target_type)))
             },
         )
+
+        return self.set_attrs(instance, mapped_attrs, map_missing_fields, skip_init)
 
 
 class PydanticModelAdapter(PopoAdapter):
@@ -212,7 +246,11 @@ class PydanticModelAdapter(PopoAdapter):
         return cls.construct()
 
     def set_attrs(
-        self, instance: TT, attrs: Mapping[str, Any], map_missing_fields: bool
+        self,
+        instance: TT,
+        attrs: Mapping[str, Any],
+        map_missing_fields: bool,
+        skip_init: Optional[bool] = False,
     ) -> TT:
         model_allow_extra = instance.model_config.get("extra") == "allow"
         if map_missing_fields and not model_allow_extra:
@@ -239,10 +277,20 @@ class PydanticModelAdapter(PopoAdapter):
         mapped_attrs: Mapping[str, Any],
         target_type: Type[TT],
         map_missing_fields: bool = False,
+        skip_init: Optional[bool] = False,
     ) -> TT:
         if map_missing_fields and not target_type.model_config.get("extra") == "allow":
             raise ValueError(
                 f"Cannot initialize target model '{target_type.__name__}' with missing fields because it does not allow extra fields during initialization. (without model_config.extra='allow')"
+            )
+        if not map_missing_fields:
+
+            return target_type(
+                **{
+                    k: v
+                    for k, v in mapped_attrs.items()
+                    if k in set(self.get_attrs_names(self.get_init_params(target_type)))
+                },
             )
         return target_type(
             **{k: v for k, v in mapped_attrs.items()},
@@ -308,7 +356,7 @@ class Mapper:
         extra = extra or {}
         target_is_type = isclass(target)
         target_type: type[TT] = target if target_is_type else type(target)
-        skip_init = skip_init or not target_is_type
+        self.skip_init = skip_init or not target_is_type
         adapter = self.get_adapter(source)
         source_type = adapter.get_source_type(source)
 
@@ -328,7 +376,7 @@ class Mapper:
         mapped_attrs = self._map(mapping, source_attrs, extra)
 
         return self._build_target(
-            skip_init,
+            self.skip_init,
             target,
             mapped_attrs,
             target_type,
@@ -402,15 +450,20 @@ class Mapper:
         try:
             if skip_init:
                 if not isclass(target):
-                    return adapter.set_attrs(target, mapped_attrs, map_missing_fields)
+                    return adapter.set_attrs(
+                        target, mapped_attrs, map_missing_fields, self.skip_init
+                    )
                 else:
                     target_instance = adapter.create_instance(target_type)
                     return adapter.set_attrs(
-                        target_instance, mapped_attrs, map_missing_fields
+                        target_instance,
+                        mapped_attrs,
+                        map_missing_fields,
+                        skip_init,
                     )
 
             return adapter._initialize_target(
-                mapped_attrs, target_type, map_missing_fields=True
+                mapped_attrs, target_type, map_missing_fields, self.skip_init
             )
         except TypeError as e:
             self._handle_mapping_error(source_instance, target_type, e)
