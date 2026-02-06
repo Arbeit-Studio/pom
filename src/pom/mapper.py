@@ -143,12 +143,6 @@ class PopoAdapter:
 
             return instance
 
-        if skip_init:
-            for name, value in attrs.items():
-                setattr(instance, name, value)
-
-            return instance
-
         init_param_names = set(self.get_attrs_names(self.get_init_params(instance)))
         if map_missing_fields:
             for name, value in attrs.items():
