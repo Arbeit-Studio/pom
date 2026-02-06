@@ -2323,7 +2323,7 @@ class TestMapMissingFieldsEdgeCases:
         """
         Given PopoClasses on target and source
         When flag map_missing_fields is True and skip_init is False (default)
-        Then the result should not ovewrite target values
+        Then the result should not overwrite target values
         """
 
         class Source:
@@ -2351,7 +2351,7 @@ class TestMapMissingFieldsEdgeCases:
         """
         Given PopoClasses on target and source
         When flag map_missing_fields is True and skip_init is False (default)
-        Then the result should not ovewrite target values
+        Then the result should not overwrite target values
         """
 
         class Source:
