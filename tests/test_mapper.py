@@ -2428,14 +2428,14 @@ class TestMapMissingFieldsEdgeCases:
 
     def test_pydantic_class_vs_instance_target_behavior_difference(self, mapper):
         """
-        CRITICAL INCONSISTENCY: Pydantic behaves differently when target is class vs instance.
+        Verify behavior when mapping to Pydantic targets as classes vs instances
+        with different values of map_missing_fields.
 
-        - Target as CLASS + map_missing_fields=False: extra fields ARE mapped (Pydantic default)
+        Expected behavior being tested:
+        - Target as CLASS + map_missing_fields=False: extra fields are NOT mapped
         - Target as INSTANCE + map_missing_fields=False: extra fields are NOT mapped
-        - Target as CLASS + map_missing_fields=True: extra fields are NOT mapped
+        - Target as CLASS + map_missing_fields=True: extra fields ARE mapped
         - Target as INSTANCE + map_missing_fields=True: extra fields ARE mapped
-
-        This inconsistency is confusing and NOT documented.
         """
 
         class SourceModel(BaseModel):
