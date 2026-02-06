@@ -351,12 +351,12 @@ class Mapper:
         extra = extra or {}
         target_is_type = isclass(target)
         target_type: type[TT] = target if target_is_type else type(target)
-        self.skip_init = skip_init or not target_is_type
+        skip_init = skip_init or not target_is_type
         adapter = self.get_adapter(source)
         source_type = adapter.get_source_type(source)
 
         self._guard_no_required_attrs_excluded(
-            source, target_type, source_type, extra, target
+            source, target_type, source_type, extra, target, skip_init
         )
 
         # Get source properties
@@ -371,7 +371,7 @@ class Mapper:
         mapped_attrs = self._map(mapping, source_attrs, extra)
 
         return self._build_target(
-            self.skip_init,
+            skip_init,
             target,
             mapped_attrs,
             target_type,
@@ -446,7 +446,7 @@ class Mapper:
             if skip_init:
                 if not isclass(target):
                     return adapter.set_attrs(
-                        target, mapped_attrs, map_missing_fields, self.skip_init
+                        target, mapped_attrs, map_missing_fields, skip_init
                     )
                 else:
                     target_instance = adapter.create_instance(target_type)
@@ -458,7 +458,7 @@ class Mapper:
                     )
 
             return adapter._initialize_target(
-                mapped_attrs, target_type, map_missing_fields, self.skip_init
+                mapped_attrs, target_type, map_missing_fields, skip_init
             )
         except TypeError as e:
             self._handle_mapping_error(source_instance, target_type, e)
@@ -472,11 +472,12 @@ class Mapper:
         source_type: Union[Type[TS], Tuple[Type[TS], ...]],
         extra: Dict[str, Any],
         target: Union[TT, Type[TT]],
+        skip_init: bool,
     ) -> None:
         missing_attrs_candidates = set(self.exclusions[source_type][target_type]) - set(
             extra.keys()
         )
-        if not self.skip_init:
+        if not skip_init:
             target_required_attrs = self._get_target_required_init_params_names(target)
 
             missing_attrs = missing_attrs_candidates & target_required_attrs
