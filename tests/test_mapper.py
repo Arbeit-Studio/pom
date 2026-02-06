@@ -1,3 +1,4 @@
+from time import perf_counter
 import unittest.mock
 from contextlib import nullcontext as does_not_raise
 from dataclasses import dataclass
@@ -1458,13 +1459,12 @@ class TestAdvancedMapping:
         source = LargeSource()
         mapper.add_mapping(source=source, target=LargeTarget)
 
-        import time
-
-        start = time.time()
+        start = perf_counter()
         result = mapper.map(
             source, LargeTarget, skip_init=True, map_missing_fields=True
         )
-        duration = time.time() - start
+        end = perf_counter()
+        duration = end - start
         assert duration < 1.0  # Should complete in under 1 second
         assert all(getattr(result, f"attr_{i}") == i for i in range(100000))
 
