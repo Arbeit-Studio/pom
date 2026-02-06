@@ -103,8 +103,6 @@ class TestBasicMapping:
     ):
         """Test mapping to a POPO target with skip_init=True."""
 
-        # TODO Esse teste está quebrando pois como o skip_init é True, e o map_missing_fields é false, no momento de atribuir os valores da Source no Target
-        # não é possível identificar que o value da Target existe, pois seu __init__ não foi executado. E isso é esperado
         class Source:
             def __init__(self, value: str, class_field: str = "set"):
                 self.value = value
