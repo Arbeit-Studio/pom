@@ -134,7 +134,8 @@ class PopoAdapter:
             return instance
 
         if skip_init and not map_missing_fields:
-            public_attrs = self.get_public_attrs(instance)
+            public_attrs = self.get_attrs_names(self.get_public_attrs(instance))
+
             for name, value in attrs.items():
                 if name in public_attrs:
                     setattr(instance, name, value)
@@ -481,14 +482,14 @@ class Mapper:
         missing_attrs_candidates = set(self.exclusions[source_type][target_type]) - set(
             extra.keys()
         )
+        if not self.skip_init:
+            target_required_attrs = self._get_target_required_init_params_names(target)
 
-        target_required_attrs = self._get_target_required_init_params_names(target)
-
-        missing_attrs = missing_attrs_candidates & target_required_attrs
-        if missing_attrs:
-            self._raise_required_attrs_excluded_error(
-                source_instance, target_type, missing_attrs
-            )
+            missing_attrs = missing_attrs_candidates & target_required_attrs
+            if missing_attrs:
+                self._raise_required_attrs_excluded_error(
+                    source_instance, target_type, missing_attrs
+                )
 
     def _get_target_required_init_params_names(
         self, target: Union[TT, Type[TT]]

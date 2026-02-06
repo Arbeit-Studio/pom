@@ -97,21 +97,24 @@ class TestBasicMapping:
         expected_name = reversed_string(source.name) if transform_name else source.name
         assert result.name == expected_name
 
-    def test_map_popo_to_popo_skip_init(self, mapper):
+    def test_map_popo_to_popo_skip_init_should_not_set_target_instance_attrs(
+        self, mapper
+    ):
         """Test mapping to a POPO target with skip_init=True."""
 
         # TODO Esse teste está quebrando pois como o skip_init é True, e o map_missing_fields é false, no momento de atribuir os valores da Source no Target
         # não é possível identificar que o value da Target existe, pois seu __init__ não foi executado. E isso é esperado
         class Source:
-            def __init__(self, value: str):
+            def __init__(self, value: str, class_field: str = "set"):
                 self.value = value
+                self.class_field = class_field
 
         class Target:
             def __init__(self, value: str = "default"):
                 self.value = value
                 self.initialized = True  # Mark if __init__ was called
 
-            extra_field: str = "not_set"
+            class_field: str = "not_set"
 
         source_instance = Source(value="test_value")
         mapper.add_mapping(source=Source, target=Target)
@@ -120,10 +123,11 @@ class TestBasicMapping:
         target_instance = mapper.map(source_instance, Target, skip_init=True)
 
         assert isinstance(target_instance, Target)
-        assert target_instance.value == "test_value"
+        assert not hasattr(target_instance, "value")
         assert not hasattr(
             target_instance, "initialized"
         )  # __init__ should not have been called
+        assert getattr(target_instance, "class_field") == "set"
 
     def test_map_without_add_mapping_dict_map_equal_attrs(self, mapper):
         """Test that calling map without adding a mapping dict maps everything that is equal to both source and target."""
@@ -147,7 +151,9 @@ class TestBasicMapping:
         assert isinstance(target, TargetModel)
         assert target.name == source_instance.name
 
-    def test_map_without_add_mapping_skip_init(self, mapper):
+    def test_map_without_add_mapping_skip_init_should_not_set_target_instance_attrs(
+        self, mapper
+    ):
         """Test mapping without add_mapping and with skip_init=True."""
 
         class SourceModel:
@@ -172,10 +178,10 @@ class TestBasicMapping:
         target = mapper.map(source_instance, target_instance_shell, skip_init=True)
 
         assert isinstance(target, TargetModel)
-        assert target.name == source_instance.name
-        assert target.age == source_instance.age  # Copied because skip_init=True
-        assert not hasattr(target, "job")  # Not in source, not set because of skip_init
-        assert target.extra_source_field == "source_only"
+        assert not hasattr(target, "name")
+        assert not hasattr(target, "age")
+        assert not hasattr(target, "job")
+        assert not hasattr(target, "extra_source_field")
 
     def test_map_without_add_mapping_multiple_sources(self, mapper):
         """Test mapping from multiple sources without add_mapping."""
@@ -214,7 +220,9 @@ class TestBasicMapping:
         assert target.city == source_b.city  # Takes from SourceModelB
         assert target.age == source_a.age  # Takes from SourceModelA
 
-    def test_map_without_add_mapping_multiple_sources_skip_init(self, mapper):
+    def test_map_without_add_mapping_multiple_sources_with_only_not_initialized_class_attrs_should_not_set_source_attrs(
+        self, mapper
+    ):
         """Test mapping from multiple sources without add_mapping and with skip_init=True."""
 
         class SourceModelA:
@@ -241,7 +249,48 @@ class TestBasicMapping:
         source_a = SourceModelA(name="Test", age=30)
         source_b = SourceModelB(job="Engineer", city="SF")
         target_instance_shell = object.__new__(TargetModel)
-        target = mapper.map((source_a, source_b), target_instance_shell, skip_init=True)
+        target = mapper.map((source_a, source_b), target_instance_shell)
+
+        assert isinstance(target, TargetModel)
+        assert not hasattr(target, "name")
+        assert not hasattr(target, "job")
+        assert not hasattr(target, "age")
+        assert not hasattr(target, "city")
+        assert not hasattr(target, "a_specific")
+        assert not hasattr(target, "b_specific")
+
+    def test_map_without_add_mapping_multiple_sources_with_only_not_initialized_class_attrs_should_set_source_attrs_when_flag_map_missing_fields_true(
+        self, mapper
+    ):
+        """Test mapping from multiple sources without add_mapping and with skip_init=True."""
+
+        class SourceModelA:
+            def __init__(self, name: str, age: int) -> None:
+                self.name = name
+                self.age = age
+                self.a_specific = "from_a"
+
+        class SourceModelB:
+            def __init__(self, job: str, city: str) -> None:
+                self.job = job
+                self.city = city
+                self.b_specific = "from_b"
+
+        class TargetModel:
+            name: str
+            age: int
+            job: str
+            city: str
+            a_specific: str
+            b_specific: str
+            # No __init__ for this test to ensure attributes are set directly
+
+        source_a = SourceModelA(name="Test", age=30)
+        source_b = SourceModelB(job="Engineer", city="SF")
+        target_instance_shell = object.__new__(TargetModel)
+        target = mapper.map(
+            (source_a, source_b), target_instance_shell, map_missing_fields=True
+        )
 
         assert isinstance(target, TargetModel)
         assert target.name == source_a.name
@@ -393,9 +442,11 @@ class TestErrorHandling:
 
         if should_raise:
             with pytest.raises(TypeError):
-                mapper.map(source, Target, skip_init=skip_init)
+                mapper.map(source, Target, skip_init=skip_init, map_missing_fields=True)
         else:
-            result = mapper.map(source, Target, skip_init=skip_init)
+            result = mapper.map(
+                source, Target, skip_init=skip_init, map_missing_fields=True
+            )
             assert result.email == source.email
 
     def test_add_mapping_source_attr_validation(self, mapper):
@@ -535,7 +586,9 @@ class TestAdvancedMapping:
                 source=Source, target=Target, mapping={"name": reversed_string}
             )
 
-    def test_mapping_from_source_instance(self, mapper, reversed_string):
+    def test_mapping_from_source_instance_should_not_set_attrs_that_not_has_been_initialized(
+        self, mapper, reversed_string
+    ):
         """
         Test adding a mapping using a source object instance instead of a class.
 
@@ -557,9 +610,37 @@ class TestAdvancedMapping:
         mapper.add_mapping(source=a, target=Target, mapping={"name": reversed_string})
         b = mapper.map(a, Target, skip_init=True)
         assert isinstance(b, Target)
+        assert not hasattr(b, "name")
+
+    def test_mapping_from_source_instance_with_flag_map_missing_fields(
+        self, mapper, reversed_string
+    ):
+        """
+        Test adding a mapping using a source object instance instead of a class.
+
+        Verifies that the mapper correctly handles instance-based mapping configurations
+        and applies transformations specified in the mapping dictionary.
+        """
+
+        class Source:
+            def __init__(self, name: str):
+                self.name = name
+
+        class Target:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        a = Source("Johnny")
+
+        mapper.add_mapping(source=a, target=Target, mapping={"name": reversed_string})
+        b = mapper.map(a, Target, skip_init=True, map_missing_fields=True)
+        assert isinstance(b, Target)
         assert b.name == "ynnhoJ"
 
-    def test_mapping_from_multiple_source_instances(self, mapper, reversed_string):
+    def test_mapping_from_multiple_source_instances_should_not_set_attrs_that_not_has_been_initialized(
+        self, mapper, reversed_string
+    ):
         """
         Test adding a mapping using a tuple of source object instances.
 
@@ -589,6 +670,41 @@ class TestAdvancedMapping:
             source=(a, b), target=Target, mapping={"name": reversed_string}
         )
         c = mapper.map((a2, b), Target, skip_init=True)
+        assert isinstance(c, Target)
+        assert not hasattr(c, "name")
+
+    def test_mapping_from_multiple_source_instances_with_flag_map_missing_fields(
+        self, mapper, reversed_string
+    ):
+        """
+        Test adding a mapping using a tuple of source object instances.
+
+        Verifies that the mapper can handle multiple source objects and correctly
+        applies transformations when mapping from multiple sources.
+        """
+
+        class SourceA:
+            def __init__(self, name: str):
+                self.name = name
+
+        class SourceB:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        class Target:
+            def __init__(self, name: str, email: str):
+                self.name = name
+                self.email = email
+
+        a = SourceA("Johnny")
+        a2 = SourceA("Johnny2")
+        b = SourceB(None, "johnny@email.com")
+
+        mapper.add_mapping(
+            source=(a, b), target=Target, mapping={"name": reversed_string}
+        )
+        c = mapper.map((a2, b), Target, skip_init=True, map_missing_fields=True)
         assert isinstance(c, Target)
         assert c.name == "2ynnhoJ"
 
@@ -1333,7 +1449,7 @@ class TestAdvancedMapping:
 
         class LargeSource:
             def __init__(self):
-                for i in range(1000):
+                for i in range(100000):
                     setattr(self, f"attr_{i}", i)
 
         class LargeTarget:
@@ -1345,11 +1461,12 @@ class TestAdvancedMapping:
         import time
 
         start = time.time()
-        result = mapper.map(source, LargeTarget, skip_init=True)
+        result = mapper.map(
+            source, LargeTarget, skip_init=True, map_missing_fields=True
+        )
         duration = time.time() - start
-
         assert duration < 1.0  # Should complete in under 1 second
-        assert all(getattr(result, f"attr_{i}") == i for i in range(1000))
+        assert all(getattr(result, f"attr_{i}") == i for i in range(100000))
 
     def test_mapping_with_none_extra(self, mapper):
         """Test that mapping works correctly when extra parameter is None."""
@@ -2479,11 +2596,11 @@ class TestMapMissingFieldsEdgeCases:
         source = Source("Test", "extra_value")
 
         # Default behavior (map_missing_fields not specified)
-        result_default = mapper.map(source, Target, skip_init=True)
+        result_default = mapper.map(source, Target, skip_init=False)
 
         # Explicit map_missing_fields=False
         result_explicit_false = mapper.map(
-            source, Target, skip_init=True, map_missing_fields=False
+            source, Target, skip_init=False, map_missing_fields=False
         )
 
         # Both should behave the same - NOT mapping extra fields
