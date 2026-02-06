@@ -1630,6 +1630,7 @@ class TestPydanticMapping:
             age: int
 
             @field_validator("age")
+            @classmethod
             def age_must_be_positive(cls, v):
                 if v < 0:
                     raise ValueError("age must be positive")
