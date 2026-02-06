@@ -252,13 +252,12 @@ class PydanticModelAdapter(PopoAdapter):
             raise ValueError(
                 f"Cannot map missing fields on target model '{type(instance).__name__}' because it does not allow extra fields."
             )
+        target_fields = instance.model_fields
 
         for name, value in attrs.items():
             if map_missing_fields and model_allow_extra:
                 setattr(instance, name, value)
                 continue
-
-            target_fields = instance.model_fields
             if map_missing_fields is False:
                 if name not in target_fields:
                     continue
