@@ -587,7 +587,7 @@ class TestAdvancedMapping:
                 source=Source, target=Target, mapping={"name": reversed_string}
             )
 
-    def test_mapping_from_source_instance_should_not_set_attrs_that_not_has_been_initialized(
+    def test_mapping_from_source_instance_should_not_set_attrs_that_have_not_been_initialized(
         self, mapper, reversed_string
     ):
         """
@@ -639,7 +639,7 @@ class TestAdvancedMapping:
         assert isinstance(b, Target)
         assert b.name == "ynnhoJ"
 
-    def test_mapping_from_multiple_source_instances_should_not_set_attrs_that_not_has_been_initialized(
+    def test_mapping_from_multiple_source_instances_should_not_set_attrs_that_have_not_been_initialized(
         self, mapper, reversed_string
     ):
         """
